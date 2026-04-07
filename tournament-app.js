@@ -916,16 +916,16 @@ const colors = {
   warningLight: "#fff7ed",
   danger: "#dc2626",
   dangerLight: "#fef2f2",
-  gray50: "#f9fafb",
-  gray100: "#f3f4f6",
-  gray200: "#e5e7eb",
-  gray300: "#d1d5db",
-  gray400: "#9ca3af",
-  gray500: "#6b7280",
-  gray600: "#4b5563",
-  gray700: "#374151",
-  gray800: "#1f2937",
-  gray900: "#111827",
+  gray50: "#f6f8f7",
+  gray100: "#ecf0ee",
+  gray200: "#dae1dd",
+  gray300: "#b8c5bd",
+  gray400: "#5f7a6b",
+  gray500: "#496054",
+  gray600: "#3a4f42",
+  gray700: "#2b3d32",
+  gray800: "#1c2b22",
+  gray900: "#0f1a13",
   white: "#ffffff",
 };
 
@@ -949,54 +949,74 @@ export default function App() {
   const [rankings, setRankings] = useState(loadRankings);
   const [players, setPlayers] = useState(loadPlayers);
 
-  // Firestore 초기 로드
-  const [firestoreLoaded, setFirestoreLoaded] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // ── PWA 뒤로가기 처리 ──
+  const pageRef = useRef(page);
+  const selectedTournamentRef = useRef(selectedTournament);
+  useEffect(() => { pageRef.current = page; }, [page]);
+  useEffect(() => { selectedTournamentRef.current = selectedTournament; }, [selectedTournament]);
 
+  // 페이지 전환 시 history에 기록
   useEffect(() => {
-    const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms));
-    const loadAll = async () => {
-      let fsTournaments = null, fsPlayers = null, fsRankings = null;
+    const state = { page, hasTournament: !!selectedTournament };
+    if (window.history.state?.page !== page || window.history.state?.hasTournament !== state.hasTournament) {
+      window.history.pushState(state, "", "");
+    }
+  }, [page, selectedTournament]);
+
+  // 뒤로가기 이벤트 처리
+  useEffect(() => {
+    const handlePopState = (e) => {
+      if (e.state && e.state.page) {
+        setPage(e.state.page);
+        if (!e.state.hasTournament) setSelectedTournament(null);
+      } else {
+        // 히스토리 끝이면 홈으로 (앱 종료 방지)
+        if (pageRef.current !== "home") {
+          setPage("home");
+          setSelectedTournament(null);
+          window.history.pushState({ page: "home", hasTournament: false }, "", "");
+        } else {
+          // 홈에서 뒤로가기 → 다시 앞으로 밀어서 앱 종료 방지
+          window.history.pushState({ page: "home", hasTournament: false }, "", "");
+        }
+      }
+    };
+    // 초기 상태 설정
+    window.history.replaceState({ page: "home", hasTournament: false }, "", "");
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // Firestore 백그라운드 동기화 (앱은 localStorage로 즉시 시작)
+  useEffect(() => {
+    if (!window.db) { setFirestoreReady(true); return; }
+    const sync = async () => {
       try {
-        const result = await Promise.race([
-          Promise.all([
-            loadFromFirestore("tournaments"),
-            loadFromFirestore("players"),
-            loadFromFirestore("rankings")
-          ]),
-          timeout(5000)
+        const results = await Promise.all([
+          loadFromFirestore("tournaments"),
+          loadFromFirestore("players"),
+          loadFromFirestore("rankings")
         ]);
-        fsTournaments = result[0];
-        fsPlayers = result[1];
-        fsRankings = result[2];
+        const fsTournaments = results[0];
+        const fsPlayers = results[1];
+        const fsRankings = results[2];
         if (fsTournaments && fsTournaments.length > 0) setTournaments(fsTournaments);
         if (fsPlayers && fsPlayers.length > 0) setPlayers(fsPlayers);
         if (fsRankings && fsRankings.length > 0) setRankings(fsRankings);
-      } catch (e) {
-        console.warn("Firestore load failed or timed out, using localStorage:", e.message);
-      }
-      // Firestore가 비어있고 localStorage에 데이터가 있으면 → Firestore로 동기화
-      setFirestoreReady(true);
-      try {
+        setFirestoreReady(true);
+        // localStorage에만 데이터가 있으면 Firestore로 업로드
         const localT = loadTournaments();
         const localP = loadPlayers();
         const localR = loadRankings();
-        if ((!fsTournaments || fsTournaments.length === 0) && localT.length > 0) {
-          saveToFirestore("tournaments", localT);
-        }
-        if ((!fsPlayers || fsPlayers.length === 0) && localP.length > 0) {
-          saveToFirestore("players", localP);
-        }
-        if ((!fsRankings || fsRankings.length === 0) && localR.length > 0) {
-          saveToFirestore("rankings", localR);
-        }
+        if ((!fsTournaments || fsTournaments.length === 0) && localT.length > 0) saveToFirestore("tournaments", localT);
+        if ((!fsPlayers || fsPlayers.length === 0) && localP.length > 0) saveToFirestore("players", localP);
+        if ((!fsRankings || fsRankings.length === 0) && localR.length > 0) saveToFirestore("rankings", localR);
       } catch (e) {
-        console.warn("Firestore sync error:", e.message);
+        console.warn("Firestore sync error:", e);
+        setFirestoreReady(true);
       }
-      setFirestoreLoaded(true);
-      setLoading(false);
     };
-    loadAll();
+    sync();
   }, []);
 
   // Persist to localStorage + Firestore whenever data changes
@@ -1167,17 +1187,6 @@ export default function App() {
     );
     return reg;
   };
-
-  if (loading) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: colors.gray50 }}>
-        <div style={{ textAlign: "center", color: colors.gray500 }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🏆</div>
-          <div style={{ fontSize: 15, fontWeight: 500 }}>데이터 로딩 중...</div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <LangContext.Provider value={{ lang, setLang, T }}>

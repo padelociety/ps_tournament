@@ -48,7 +48,7 @@ firebase.initializeApp(firebaseConfig);
 window.db = firebase.firestore();
 
 // React hooks를 전역으로 노출
-const { useState, useEffect, useCallback, createContext, useContext } = React;
+const { useState, useEffect, useCallback, useRef, createContext, useContext } = React;
 
 // tournament-app.js 로드 및 실행
 fetch("tournament-app.js")
