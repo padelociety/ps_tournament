@@ -1580,7 +1580,7 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
             {t.location && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("location")}: {t.location}</p>}
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: colors.gray500 }}>
               <Icon name="users" size={16} />
-              <span>{t.registrations?.filter((r) => r.status === "confirmed").length || 0} / {t.maxTeams || "?"}</span>
+              <span>{t.registrations?.filter((r) => r.status === "confirmed").length || 0} / {t.type === "americano" ? (t.americanoPlayers || "?") : (t.maxTeams || "?")}</span>
               {t.entryFee && <span style={{ marginLeft: "auto", fontWeight: 600, color: colors.gray700 }}>{t.entryFee}</span>}
             </div>
           </Card>
@@ -2345,7 +2345,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
             )}
             <div style={{ fontSize: 14, color: colors.gray600, marginBottom: 12 }}>
               <div>
-                {T("participants")}: <strong>{confirmedRegs.length}</strong> / {tournament.maxTeams || "?"}
+                {T("participants")}: <strong>{confirmedRegs.length}</strong> / {tournament.type === "americano" ? (tournament.americanoPlayers || "?") : (tournament.maxTeams || "?")}
                 {pendingRegs.length > 0 && <span style={{ color: colors.warning }}> ({pendingRegs.length} {T("pendingPayment")})</span>}
               </div>
             </div>
