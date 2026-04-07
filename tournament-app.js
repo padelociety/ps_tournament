@@ -423,25 +423,8 @@ const t = (lang, key) => translations[lang]?.[key] || key;
 // ============================================================
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-const STORAGE_KEY = "padel_tournaments";
-const loadTournaments = () => {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch { return []; }
-};
-const saveTournaments = (list) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    localStorage.setItem(STORAGE_KEY + "_ts", Date.now().toString());
-  } catch {}
-};
-const getLocalTimestamp = (key) => {
-  try { return parseInt(localStorage.getItem(key + "_ts") || "0"); } catch { return 0; }
-};
-
 // ============================================================
-// FIRESTORE HELPERS
+// FIRESTORE HELPERS (Firestore 전용 — localStorage 사용하지 않음)
 // ============================================================
 const fsDb = window.db;
 const FS_COLLECTION = "appData";
@@ -472,10 +455,6 @@ const saveToFirestore = async (docId, list) => {
     console.error("Firestore save error (" + docId + "):", e);
   }
 };
-
-let _firestoreReady = false;
-const isFirestoreReady = () => _firestoreReady;
-const setFirestoreReady = (v) => { _firestoreReady = v; };
 
 const GENDER_TYPES = ["menDoubles", "womenDoubles", "mixedDoubles", "openDoubles"];
 const LEVELS = ["beginner", "bronze", "silver", "silverPlus", "gold", "goldPlus", "platinum", "platinumPlus"];
@@ -512,33 +491,6 @@ const POINT_TABLE = {
 // Result index mapping: W=0, F=1, SF=2, QF=3, R16=4, R32=5
 const RESULT_LABELS = { ko: ["우승", "준우승", "4강", "8강", "16강", "32강"], en: ["W", "F", "SF", "QF", "R16", "R32"] };
 
-const PLAYERS_KEY = "padel_players";
-const loadPlayers = () => {
-  try {
-    const data = localStorage.getItem(PLAYERS_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch { return []; }
-};
-const savePlayers = (list) => {
-  try {
-    localStorage.setItem(PLAYERS_KEY, JSON.stringify(list));
-    localStorage.setItem(PLAYERS_KEY + "_ts", Date.now().toString());
-  } catch {}
-};
-
-const RANKING_KEY = "padel_rankings";
-const loadRankings = () => {
-  try {
-    const data = localStorage.getItem(RANKING_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch { return []; }
-};
-const saveRankings = (list) => {
-  try {
-    localStorage.setItem(RANKING_KEY, JSON.stringify(list));
-    localStorage.setItem(RANKING_KEY + "_ts", Date.now().toString());
-  } catch {}
-};
 
 // Calculate points for a placement result in a given tournament grade
 const getPoints = (grade, resultIdx) => {
@@ -950,7 +902,7 @@ const colors = {
 export default function App() {
   const [lang, setLang] = useState("ko");
   const [page, setPage] = useState("home"); // home, admin, tournament, register
-  const [tournaments, setTournaments] = useState(loadTournaments);
+  const [tournaments, setTournaments] = useState([]);
   const [selectedTournament, setSelectedTournament] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -961,8 +913,8 @@ export default function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingTournament, setEditingTournament] = useState(null);
   const [showLangMenu, setShowLangMenu] = useState(false);
-  const [rankings, setRankings] = useState(loadRankings);
-  const [players, setPlayers] = useState(loadPlayers);
+  const [rankings, setRankings] = useState([]);
+  const [players, setPlayers] = useState([]);
 
   // ── PWA 뒤로가기 처리 ──
   const pageRef = useRef(page);
@@ -1002,70 +954,41 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  // Firestore 백그라운드 동기화 — 타임스탬프 비교로 최신 데이터 사용
+  // Firestore에서 데이터 로드 (앱 시작 시 1회)
+  const [dataLoaded, setDataLoaded] = useState(false);
   useEffect(() => {
-    if (!window.db) { setFirestoreReady(true); return; }
-    const sync = async () => {
+    if (!window.db) { setDataLoaded(true); return; }
+    const load = async () => {
       try {
-        const results = await Promise.all([
+        const [fsT, fsP, fsR] = await Promise.all([
           loadFromFirestore("tournaments"),
           loadFromFirestore("players"),
           loadFromFirestore("rankings")
         ]);
-        const fsT = results[0];
-        const fsP = results[1];
-        const fsR = results[2];
-
-        // 각 데이터별로 Firestore vs localStorage 타임스탬프 비교
-        const pickNewer = (fsResult, localLoader, storageKey, firestoreDocId, setter) => {
-          const fsItems = fsResult?.items || [];
-          const fsTime = fsResult?.updatedAt ? new Date(fsResult.updatedAt).getTime() : 0;
-          const localTime = getLocalTimestamp(storageKey);
-          const localItems = localLoader();
-
-          if (fsItems.length === 0 && localItems.length === 0) return;
-
-          if (localTime > fsTime && localItems.length > 0) {
-            // localStorage가 더 최신 → Firestore에 업로드
-            setter(localItems);
-            saveToFirestore(firestoreDocId, localItems);
-            console.log("[sync] localStorage가 더 최신:", firestoreDocId, "local:", localTime, "fs:", fsTime);
-          } else if (fsItems.length > 0) {
-            // Firestore가 더 최신이거나 같으면 → Firestore 데이터 사용
-            setter(fsItems);
-            console.log("[sync] Firestore 데이터 사용:", firestoreDocId, "local:", localTime, "fs:", fsTime);
-          }
-        };
-
-        pickNewer(fsT, loadTournaments, STORAGE_KEY, "tournaments", setTournaments);
-        pickNewer(fsP, loadPlayers, PLAYERS_KEY, "players", setPlayers);
-        pickNewer(fsR, loadRankings, RANKING_KEY, "rankings", setRankings);
-
-        setFirestoreReady(true);
+        if (fsT?.items?.length) setTournaments(fsT.items);
+        if (fsP?.items?.length) setPlayers(fsP.items);
+        if (fsR?.items?.length) setRankings(fsR.items);
       } catch (e) {
-        console.warn("Firestore sync error:", e);
-        setFirestoreReady(true);
+        console.error("Firestore load error:", e);
       }
+      setDataLoaded(true);
     };
-    sync();
+    load();
   }, []);
 
-  // Persist to localStorage + Firestore whenever data changes (only after sync is done)
+  // 데이터 변경 시 Firestore에만 저장 (로드 완료 후에만)
   useEffect(() => {
-    if (!firestoreReady) return;
-    saveTournaments(tournaments);
+    if (!dataLoaded) return;
     saveToFirestore("tournaments", tournaments);
-  }, [tournaments, firestoreReady]);
+  }, [tournaments]);
   useEffect(() => {
-    if (!firestoreReady) return;
-    savePlayers(players);
+    if (!dataLoaded) return;
     saveToFirestore("players", players);
-  }, [players, firestoreReady]);
+  }, [players]);
   useEffect(() => {
-    if (!firestoreReady) return;
-    saveRankings(rankings);
+    if (!dataLoaded) return;
     saveToFirestore("rankings", rankings);
-  }, [rankings, firestoreReady]);
+  }, [rankings]);
 
   // Check and auto-close registration when deadline passes
   useEffect(() => {
@@ -1221,6 +1144,15 @@ export default function App() {
     );
     return reg;
   };
+
+  // Firestore 로딩 중 표시
+  if (!dataLoaded) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: colors.gray50 }}>
+        <p style={{ fontSize: 14, color: colors.gray500 }}>{lang === "ko" ? "로딩 중..." : "Loading..."}</p>
+      </div>
+    );
+  }
 
   return (
     <LangContext.Provider value={{ lang, setLang, T }}>
