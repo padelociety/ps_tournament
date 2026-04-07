@@ -431,7 +431,13 @@ const loadTournaments = () => {
   } catch { return []; }
 };
 const saveTournaments = (list) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    localStorage.setItem(STORAGE_KEY + "_ts", Date.now().toString());
+  } catch {}
+};
+const getLocalTimestamp = (key) => {
+  try { return parseInt(localStorage.getItem(key + "_ts") || "0"); } catch { return 0; }
 };
 
 // ============================================================
@@ -444,7 +450,10 @@ const loadFromFirestore = async (docId) => {
   try {
     if (!fsDb) return null;
     const doc = await fsDb.collection(FS_COLLECTION).doc(docId).get();
-    if (doc.exists) return doc.data().items || [];
+    if (doc.exists) {
+      const data = doc.data();
+      return { items: data.items || [], updatedAt: data.updatedAt || null };
+    }
     return null;
   } catch (e) {
     console.error("Firestore load error (" + docId + "):", e);
@@ -511,7 +520,10 @@ const loadPlayers = () => {
   } catch { return []; }
 };
 const savePlayers = (list) => {
-  try { localStorage.setItem(PLAYERS_KEY, JSON.stringify(list)); } catch {}
+  try {
+    localStorage.setItem(PLAYERS_KEY, JSON.stringify(list));
+    localStorage.setItem(PLAYERS_KEY + "_ts", Date.now().toString());
+  } catch {}
 };
 
 const RANKING_KEY = "padel_rankings";
@@ -522,7 +534,10 @@ const loadRankings = () => {
   } catch { return []; }
 };
 const saveRankings = (list) => {
-  try { localStorage.setItem(RANKING_KEY, JSON.stringify(list)); } catch {}
+  try {
+    localStorage.setItem(RANKING_KEY, JSON.stringify(list));
+    localStorage.setItem(RANKING_KEY + "_ts", Date.now().toString());
+  } catch {}
 };
 
 // Calculate points for a placement result in a given tournament grade
@@ -987,7 +1002,7 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  // Firestore 백그라운드 동기화 (앱은 localStorage로 즉시 시작)
+  // Firestore 백그라운드 동기화 — 타임스탬프 비교로 최신 데이터 사용
   useEffect(() => {
     if (!window.db) { setFirestoreReady(true); return; }
     const sync = async () => {
@@ -997,20 +1012,36 @@ export default function App() {
           loadFromFirestore("players"),
           loadFromFirestore("rankings")
         ]);
-        const fsTournaments = results[0];
-        const fsPlayers = results[1];
-        const fsRankings = results[2];
-        if (fsTournaments && fsTournaments.length > 0) setTournaments(fsTournaments);
-        if (fsPlayers && fsPlayers.length > 0) setPlayers(fsPlayers);
-        if (fsRankings && fsRankings.length > 0) setRankings(fsRankings);
+        const fsT = results[0];
+        const fsP = results[1];
+        const fsR = results[2];
+
+        // 각 데이터별로 Firestore vs localStorage 타임스탬프 비교
+        const pickNewer = (fsResult, localLoader, storageKey, firestoreDocId, setter) => {
+          const fsItems = fsResult?.items || [];
+          const fsTime = fsResult?.updatedAt ? new Date(fsResult.updatedAt).getTime() : 0;
+          const localTime = getLocalTimestamp(storageKey);
+          const localItems = localLoader();
+
+          if (fsItems.length === 0 && localItems.length === 0) return;
+
+          if (localTime > fsTime && localItems.length > 0) {
+            // localStorage가 더 최신 → Firestore에 업로드
+            setter(localItems);
+            saveToFirestore(firestoreDocId, localItems);
+            console.log("[sync] localStorage가 더 최신:", firestoreDocId, "local:", localTime, "fs:", fsTime);
+          } else if (fsItems.length > 0) {
+            // Firestore가 더 최신이거나 같으면 → Firestore 데이터 사용
+            setter(fsItems);
+            console.log("[sync] Firestore 데이터 사용:", firestoreDocId, "local:", localTime, "fs:", fsTime);
+          }
+        };
+
+        pickNewer(fsT, loadTournaments, STORAGE_KEY, "tournaments", setTournaments);
+        pickNewer(fsP, loadPlayers, PLAYERS_KEY, "players", setPlayers);
+        pickNewer(fsR, loadRankings, RANKING_KEY, "rankings", setRankings);
+
         setFirestoreReady(true);
-        // localStorage에만 데이터가 있으면 Firestore로 업로드
-        const localT = loadTournaments();
-        const localP = loadPlayers();
-        const localR = loadRankings();
-        if ((!fsTournaments || fsTournaments.length === 0) && localT.length > 0) saveToFirestore("tournaments", localT);
-        if ((!fsPlayers || fsPlayers.length === 0) && localP.length > 0) saveToFirestore("players", localP);
-        if ((!fsRankings || fsRankings.length === 0) && localR.length > 0) saveToFirestore("rankings", localR);
       } catch (e) {
         console.warn("Firestore sync error:", e);
         setFirestoreReady(true);
