@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PS Tournament">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="manifest" href="tournament_manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>PS Tournament</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body {
+  background: #0a0a0a;
+  color: #f0f0f0;
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+#root { min-height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// React hooks를 전역으로 노출
+const { useState, useEffect, useCallback, createContext, useContext } = React;
+
+// tournament-app.jsx 로드 및 실행
+fetch("tournament-app.jsx")
+  .then(r => r.text())
+  .then(code => {
+    // import 구문 제거 (이미 전역으로 로드됨)
+    code = code.replace(/^import\s+\{[^}]*\}\s+from\s+["']react["'];?\s*/gm, "");
+    // export default → window 할당
+    code = code.replace(/export\s+default\s+function\s+App/, "function App");
+    // 마지막에 렌더링 코드 추가
+    code += "\nReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));";
+    // Babel 변환 후 실행
+    const transformed = Babel.transform(code, { presets: ["react"] }).code;
+    const script = document.createElement("script");
+    script.textContent = transformed;
+    document.body.appendChild(script);
+  })
+  .catch(err => {
+    document.getElementById("root").innerHTML =
+      '<div style="padding:40px;text-align:center;color:#f87171;">앱 로딩 실패: ' + err.message + '</div>';
+  });
+
+// Service Worker 등록
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("tournament_sw.js").catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
