@@ -96,6 +96,7 @@ const translations = {
     goalDiff: "득실차",
     rank: "순위",
     noTournaments: "등록된 토너먼트가 없습니다",
+    pastTournaments: "지난 대회",
     backToList: "목록으로",
     startTournament: "토너먼트 시작",
     drawGroups: "조 추첨",
@@ -300,6 +301,7 @@ const translations = {
     goalDiff: "GD",
     rank: "Rank",
     noTournaments: "No tournaments yet",
+    pastTournaments: "Past Tournaments",
     backToList: "Back to List",
     startTournament: "Start Tournament",
     drawGroups: "Draw Groups",
@@ -1474,53 +1476,70 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
     );
   }
 
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const upcoming = tournaments.filter((t) => !t.date || new Date(t.date) >= now);
+  const past = tournaments.filter((t) => t.date && new Date(t.date) < now);
+
+  const renderCard = (t) => (
+    <Card key={t.id} onClick={() => onSelect(t)} style={{ cursor: "pointer" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div>
+          <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+            <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: colors.white, backgroundColor: typeColors[t.type] }}>
+              {T(t.type)}
+            </span>
+            {t.grade && (
+              <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: colors.white, backgroundColor: GRADE_COLORS[t.grade] || colors.gray400 }}>
+                {T("grade" + t.grade.charAt(0).toUpperCase() + t.grade.slice(1))}
+              </span>
+            )}
+          </div>
+          <h3 style={{ fontSize: 18, fontWeight: 700, color: colors.gray800, margin: 0 }}>{t.name}</h3>
+        </div>
+        <Badge type={t.stage === "registration" ? "info" : t.stage === "completed" ? "confirmed" : "pending"}>
+          {t.stage === "registration" ? T("registrationOpen") : t.stage === "completed" ? T("completed") : T("ongoing")}
+        </Badge>
+      </div>
+      {(t.categoryGender || t.categoryLevel) && (
+        <div style={{ margin: "6px 0" }}>
+          <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600, background: colors.primaryLight, color: colors.primary }}>
+            {categoryLabel(lang, t.categoryGender, t.categoryLevel)}
+          </span>
+        </div>
+      )}
+      {t.date && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("date")}: {formatDate(t.date, lang)}</p>}
+      {t.registrationDeadline && (
+        <p style={{ fontSize: 13, margin: "4px 0", color: new Date(t.registrationDeadline) < new Date() ? colors.danger : colors.warning }}>
+          {T("registrationDeadline")}: {formatDate(t.registrationDeadline, lang)}
+          {(() => { const diff = Math.ceil((new Date(t.registrationDeadline) - new Date()) / 86400000); return diff < 0 ? ` - ${T("deadlinePassed")}` : ` - ${diff}${T("daysLeft")}`; })()}
+        </p>
+      )}
+      {t.location && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("location")}: {t.location}</p>}
+      <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: colors.gray500 }}>
+        <Icon name="users" size={16} />
+        <span>{t.registrations?.filter((r) => r.status === "confirmed").length || 0} / {t.type === "americano" ? (t.americanoPlayers || "?") : (t.maxTeams || "?")}</span>
+        {t.entryFee && <span style={{ marginLeft: "auto", fontWeight: 600, color: colors.gray700 }}>{t.entryFee}</span>}
+      </div>
+    </Card>
+  );
+
   return (
     <div>
       <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.gray800, marginBottom: 20 }}>{T("tournaments")}</h2>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
-        {tournaments.map((t) => (
-          <Card key={t.id} onClick={() => onSelect(t)} style={{ cursor: "pointer" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div>
-                <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: colors.white, backgroundColor: typeColors[t.type] }}>
-                    {T(t.type)}
-                  </span>
-                  {t.grade && (
-                    <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: colors.white, backgroundColor: GRADE_COLORS[t.grade] || colors.gray400 }}>
-                      {T("grade" + t.grade.charAt(0).toUpperCase() + t.grade.slice(1))}
-                    </span>
-                  )}
-                </div>
-                <h3 style={{ fontSize: 18, fontWeight: 700, color: colors.gray800, margin: 0 }}>{t.name}</h3>
-              </div>
-              <Badge type={t.stage === "registration" ? "info" : t.stage === "completed" ? "confirmed" : "pending"}>
-                {t.stage === "registration" ? T("registrationOpen") : t.stage === "completed" ? T("completed") : T("ongoing")}
-              </Badge>
-            </div>
-            {(t.categoryGender || t.categoryLevel) && (
-              <div style={{ margin: "6px 0" }}>
-                <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600, background: colors.primaryLight, color: colors.primary }}>
-                  {categoryLabel(lang, t.categoryGender, t.categoryLevel)}
-                </span>
-              </div>
-            )}
-            {t.date && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("date")}: {formatDate(t.date, lang)}</p>}
-            {t.registrationDeadline && (
-              <p style={{ fontSize: 13, margin: "4px 0", color: new Date(t.registrationDeadline) < new Date() ? colors.danger : colors.warning }}>
-                {T("registrationDeadline")}: {formatDate(t.registrationDeadline, lang)}
-                {(() => { const diff = Math.ceil((new Date(t.registrationDeadline) - new Date()) / 86400000); return diff < 0 ? ` - ${T("deadlinePassed")}` : ` - ${diff}${T("daysLeft")}`; })()}
-              </p>
-            )}
-            {t.location && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("location")}: {t.location}</p>}
-            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: colors.gray500 }}>
-              <Icon name="users" size={16} />
-              <span>{t.registrations?.filter((r) => r.status === "confirmed").length || 0} / {t.type === "americano" ? (t.americanoPlayers || "?") : (t.maxTeams || "?")}</span>
-              {t.entryFee && <span style={{ marginLeft: "auto", fontWeight: 600, color: colors.gray700 }}>{t.entryFee}</span>}
-            </div>
-          </Card>
-        ))}
-      </div>
+      {upcoming.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+          {upcoming.map(renderCard)}
+        </div>
+      )}
+      {past.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.gray500, marginBottom: 12 }}>{T("pastTournaments")}</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16, opacity: 0.7 }}>
+            {past.map(renderCard)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
