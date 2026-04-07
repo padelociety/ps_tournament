@@ -1,7 +1,7 @@
 const CACHE_NAME = "ps-tournament-v1";
 const ASSETS = [
   "./tournament.html",
-  "./tournament-app.jsx",
+  "./tournament-app.js",
   "./tournament_manifest.json",
   "./icon-192.png",
   "./icon-512.png",
