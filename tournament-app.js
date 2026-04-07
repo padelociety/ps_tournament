@@ -1221,7 +1221,7 @@ export default function App() {
 
   return (
     <LangContext.Provider value={{ lang, setLang, T }}>
-      <div style={{ minHeight: "100vh", backgroundColor: colors.gray50, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }} onClick={() => showLangMenu && setShowLangMenu(false)}>
+      <div style={{ minHeight: "100vh", backgroundColor: colors.gray50, color: colors.gray800, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }} onClick={() => showLangMenu && setShowLangMenu(false)}>
         {/* HEADER */}
         <header style={{ background: `linear-gradient(135deg, ${colors.primary}, ${colors.primaryDark})`, color: colors.white, padding: "0 12px", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}>
           <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
