@@ -1050,19 +1050,22 @@ export default function App() {
     sync();
   }, []);
 
-  // Persist to localStorage + Firestore whenever data changes
+  // Persist to localStorage + Firestore whenever data changes (only after sync is done)
   useEffect(() => {
+    if (!firestoreReady) return;
     saveTournaments(tournaments);
-    if (isFirestoreReady()) saveToFirestore("tournaments", tournaments);
-  }, [tournaments]);
+    saveToFirestore("tournaments", tournaments);
+  }, [tournaments, firestoreReady]);
   useEffect(() => {
+    if (!firestoreReady) return;
     savePlayers(players);
-    if (isFirestoreReady()) saveToFirestore("players", players);
-  }, [players]);
+    saveToFirestore("players", players);
+  }, [players, firestoreReady]);
   useEffect(() => {
+    if (!firestoreReady) return;
     saveRankings(rankings);
-    if (isFirestoreReady()) saveToFirestore("rankings", rankings);
-  }, [rankings]);
+    saveToFirestore("rankings", rankings);
+  }, [rankings, firestoreReady]);
 
   // Check and auto-close registration when deadline passes
   useEffect(() => {
