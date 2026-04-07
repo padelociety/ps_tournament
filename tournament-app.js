@@ -967,7 +967,21 @@ export default function App() {
       } catch (e) {
         console.error("Firestore initial load error:", e);
       }
+      // Firestore가 비어있고 localStorage에 데이터가 있으면 → Firestore로 동기화
       setFirestoreReady(true);
+      const localT = loadTournaments();
+      const localP = loadPlayers();
+      const localR = loadRankings();
+      if ((!fsTournaments || fsTournaments.length === 0) && localT.length > 0) {
+        saveToFirestore("tournaments", localT);
+      }
+      if ((!fsPlayers || fsPlayers.length === 0) && localP.length > 0) {
+        saveToFirestore("players", localP);
+      }
+      if ((!fsRankings || fsRankings.length === 0) && localR.length > 0) {
+        saveToFirestore("rankings", localR);
+      }
+
       setFirestoreLoaded(true);
       setLoading(false);
     };
