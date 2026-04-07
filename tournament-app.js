@@ -171,7 +171,7 @@ const translations = {
     enableThirdPlace: "3/4위전 포함",
     bracketView: "대진표",
     ranking: "랭킹",
-    rankingTitle: "KPF 포인트 랭킹",
+    rankingTitle: "PS 포인트 랭킹",
     tournamentGrade: "대회 등급",
     gradeMaster: "Master",
     gradePlatinum: "Platinum",
@@ -375,7 +375,7 @@ const translations = {
     enableThirdPlace: "Include 3rd Place Match",
     bracketView: "Bracket",
     ranking: "Ranking",
-    rankingTitle: "KPF Point Ranking",
+    rankingTitle: "PS Point Ranking",
     tournamentGrade: "Tournament Grade",
     gradeMaster: "Master",
     gradePlatinum: "Platinum",
@@ -496,7 +496,7 @@ const categoryLabel = (lang, genderKey, levelKey) => {
 const TOURNAMENT_GRADES = ["finals", "master", "platinum", "gold", "silver", "bronze"];
 const GRADE_COLORS = {
   master: "#b8860b", platinum: "#8b8b8b", gold: "#daa520",
-  silver: "#708090", bronze: "#cd7f32", finals: "#b8860b",
+  silver: "#708090", bronze: "#cd7f32", finals: "#104734",
 };
 
 // Points: [W, F, SF, QF, R16, R32]
@@ -1294,6 +1294,7 @@ export default function App() {
               onCreate={() => { setShowCreateForm(true); setEditingTournament(null); }}
               onEdit={(t) => { setEditingTournament(t); setShowCreateForm(true); }}
               onDelete={deleteTournament}
+              onRecalcPoints={recalcAllPoints}
               T={T}
               lang={lang}
             />
@@ -1592,14 +1593,17 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
 // ============================================================
 // ADMIN PANEL
 // ============================================================
-function AdminPanel({ tournaments, onSelect, onCreate, onEdit, onDelete, T, lang }) {
+function AdminPanel({ tournaments, onSelect, onCreate, onEdit, onDelete, onRecalcPoints, T, lang }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.gray800, margin: 0 }}>{T("admin")}</h2>
-        <Btn onClick={onCreate}><Icon name="plus" size={16} />{T("createTournament")}</Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          {onRecalcPoints && <Btn size="sm" variant="outline" onClick={onRecalcPoints}>{lang === "ko" ? "포인트 재계산" : "Recalculate Points"}</Btn>}
+          <Btn onClick={onCreate}><Icon name="plus" size={16} />{T("createTournament")}</Btn>
+        </div>
       </div>
       {tournaments.length === 0 ? (
         <div style={{ textAlign: "center", padding: "60px 20px", color: colors.gray400 }}>
@@ -3781,9 +3785,6 @@ function RankingPage({ rankings, tournaments, players, T, lang, onRecalcPoints, 
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.gray800, margin: 0 }}>{T("rankingTitle")}</h2>
-        {isAdmin && onRecalcPoints && (
-          <Btn size="sm" variant="outline" onClick={onRecalcPoints}>{lang === "ko" ? "포인트 재계산" : "Recalculate Points"}</Btn>
-        )}
       </div>
       <p style={{ fontSize: 13, color: colors.gray500, marginBottom: 20 }}>
         {lang === "ko" ? "최근 52주 이내 대회 결과 기반" : "Based on results from the last 52 weeks"}
