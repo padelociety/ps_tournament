@@ -954,34 +954,45 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms));
     const loadAll = async () => {
+      let fsTournaments = null, fsPlayers = null, fsRankings = null;
       try {
-        const [fsTournaments, fsPlayers, fsRankings] = await Promise.all([
-          loadFromFirestore("tournaments"),
-          loadFromFirestore("players"),
-          loadFromFirestore("rankings")
+        const result = await Promise.race([
+          Promise.all([
+            loadFromFirestore("tournaments"),
+            loadFromFirestore("players"),
+            loadFromFirestore("rankings")
+          ]),
+          timeout(5000)
         ]);
+        fsTournaments = result[0];
+        fsPlayers = result[1];
+        fsRankings = result[2];
         if (fsTournaments && fsTournaments.length > 0) setTournaments(fsTournaments);
         if (fsPlayers && fsPlayers.length > 0) setPlayers(fsPlayers);
         if (fsRankings && fsRankings.length > 0) setRankings(fsRankings);
       } catch (e) {
-        console.error("Firestore initial load error:", e);
+        console.warn("Firestore load failed or timed out, using localStorage:", e.message);
       }
       // Firestore가 비어있고 localStorage에 데이터가 있으면 → Firestore로 동기화
       setFirestoreReady(true);
-      const localT = loadTournaments();
-      const localP = loadPlayers();
-      const localR = loadRankings();
-      if ((!fsTournaments || fsTournaments.length === 0) && localT.length > 0) {
-        saveToFirestore("tournaments", localT);
+      try {
+        const localT = loadTournaments();
+        const localP = loadPlayers();
+        const localR = loadRankings();
+        if ((!fsTournaments || fsTournaments.length === 0) && localT.length > 0) {
+          saveToFirestore("tournaments", localT);
+        }
+        if ((!fsPlayers || fsPlayers.length === 0) && localP.length > 0) {
+          saveToFirestore("players", localP);
+        }
+        if ((!fsRankings || fsRankings.length === 0) && localR.length > 0) {
+          saveToFirestore("rankings", localR);
+        }
+      } catch (e) {
+        console.warn("Firestore sync error:", e.message);
       }
-      if ((!fsPlayers || fsPlayers.length === 0) && localP.length > 0) {
-        saveToFirestore("players", localP);
-      }
-      if ((!fsRankings || fsRankings.length === 0) && localR.length > 0) {
-        saveToFirestore("rankings", localR);
-      }
-
       setFirestoreLoaded(true);
       setLoading(false);
     };
