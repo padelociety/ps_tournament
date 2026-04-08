@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.1";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -448,17 +448,36 @@ const loadFromFirestore = async (docId) => {
   }
 };
 
+// 저장 상태 표시 (디버깅용)
+const showSaveStatus = (msg, isError) => {
+  const el = document.getElementById("save-status");
+  if (!el) {
+    const div = document.createElement("div");
+    div.id = "save-status";
+    div.style.cssText = "position:fixed;bottom:60px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:8px;font-size:12px;z-index:9999;transition:opacity 0.3s;pointer-events:none;";
+    document.body.appendChild(div);
+  }
+  const status = document.getElementById("save-status");
+  status.textContent = msg;
+  status.style.background = isError ? "#dc2626" : "#16a34a";
+  status.style.color = "#fff";
+  status.style.opacity = "1";
+  setTimeout(() => { status.style.opacity = "0"; }, 2000);
+};
+
 const saveToFirestore = async (docId, list) => {
   try {
-    if (!fsDb) { console.warn("[save] fsDb not ready, skipping:", docId); return; }
-    console.log("[save]", docId, "items:", list.length);
+    if (!fsDb) { showSaveStatus("DB 연결 안됨!", true); return false; }
     await fsDb.collection(FS_COLLECTION).doc(docId).set({
       items: JSON.parse(JSON.stringify(list)),
       updatedAt: new Date().toISOString()
     });
-    console.log("[save]", docId, "✓ saved");
+    showSaveStatus("✓ 저장 완료 (" + docId + ")");
+    return true;
   } catch (e) {
-    console.error("[save] Firestore save FAILED (" + docId + "):", e);
+    console.error("[save] FAILED:", e);
+    showSaveStatus("✗ 저장 실패: " + e.message, true);
+    return false;
   }
 };
 
