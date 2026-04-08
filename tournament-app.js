@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.4";
+const APP_VERSION = "2.5";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -680,6 +680,13 @@ const formatDate = (dateStr, lang) => {
   return day ? `${dateStr} (${day})` : dateStr;
 };
 
+// 마감일을 해당일 23:59:59로 설정 (예: "2026-04-08" → 4월 8일 23:59:59)
+const deadlineEndOfDay = (dateStr) => {
+  const d = new Date(dateStr);
+  d.setHours(23, 59, 59, 999);
+  return d;
+};
+
 // ============================================================
 // ROUND ROBIN LOGIC
 // ============================================================
@@ -1049,7 +1056,7 @@ export default function App() {
     const current = tournamentsRef.current;
     const updated = current.map((t) => {
       if (t.stage === "registration" && t.registrationDeadline) {
-        const dl = new Date(t.registrationDeadline);
+        const dl = deadlineEndOfDay(t.registrationDeadline);
         if (dl < new Date() && !t.registrationClosed) {
           return { ...t, registrationClosed: true };
         }
@@ -1571,9 +1578,9 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
       )}
       {t.date && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("date")}: {formatDate(t.date, lang)}</p>}
       {t.registrationDeadline && (
-        <p style={{ fontSize: 13, margin: "4px 0", color: new Date(t.registrationDeadline) < new Date() ? colors.danger : colors.warning }}>
+        <p style={{ fontSize: 13, margin: "4px 0", color: deadlineEndOfDay(t.registrationDeadline) < new Date() ? colors.danger : colors.warning }}>
           {T("registrationDeadline")}: {formatDate(t.registrationDeadline, lang)}
-          {(() => { const diff = Math.ceil((new Date(t.registrationDeadline) - new Date()) / 86400000); return diff < 0 ? ` - ${T("deadlinePassed")}` : ` - ${diff}${T("daysLeft")}`; })()}
+          {(() => { const diff = Math.ceil((deadlineEndOfDay(t.registrationDeadline) - new Date()) / 86400000); return diff < 0 ? ` - ${T("deadlinePassed")}` : ` - ${diff}${T("daysLeft")}`; })()}
         </p>
       )}
       {t.location && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("location")}: {t.location}</p>}
@@ -2324,7 +2331,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
                   <strong>{T("registrationDeadline")}:</strong>
                   <span>{formatDate(tournament.registrationDeadline, lang)}</span>
                   {(() => {
-                    const dl = new Date(tournament.registrationDeadline);
+                    const dl = deadlineEndOfDay(tournament.registrationDeadline);
                     const now = new Date();
                     const diff = Math.ceil((dl - now) / (1000 * 60 * 60 * 24));
                     return diff < 0
@@ -2386,7 +2393,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
               </div>
             </div>
             {tournament.stage === "registration" && (() => {
-              const deadlinePassed = tournament.registrationDeadline && new Date(tournament.registrationDeadline) < new Date();
+              const deadlinePassed = tournament.registrationDeadline && deadlineEndOfDay(tournament.registrationDeadline) < new Date();
               return deadlinePassed
                 ? <Badge type="danger">{T("deadlinePassed")}</Badge>
                 : <Btn onClick={() => setShowRegForm(true)}>{T("submitRegistration")}</Btn>;
