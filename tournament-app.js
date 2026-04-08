@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.2";
+const APP_VERSION = "2.3";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2975,11 +2975,16 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   };
 
   const saveScore = (groupIdx, roundIdx, matchId, homeScore, awayScore, setScores, extra) => {
+    const isScheduleOnly = extra?.completed === false;
     const newGroups = [...groups];
     const group = { ...newGroups[groupIdx] };
     group.rounds = group.rounds.map((round, ri) =>
       ri === roundIdx
-        ? round.map((m) => m.id === matchId ? { ...m, homeScore: parseInt(homeScore), awayScore: parseInt(awayScore), completed: true, ...(extra || {}) } : m)
+        ? round.map((m) => m.id === matchId ? {
+            ...m,
+            ...(isScheduleOnly ? {} : { homeScore: parseInt(homeScore), awayScore: parseInt(awayScore), completed: true }),
+            ...(extra || {}),
+          } : m)
         : round
     );
     newGroups[groupIdx] = group;
@@ -2988,10 +2993,15 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   };
 
   const saveKnockoutScore = (roundIdx, matchId, homeScore, awayScore, setScores, extra) => {
+    const isScheduleOnly = extra?.completed === false;
     const bracket = { ...knockoutBracket };
     bracket.rounds = bracket.rounds.map((round, ri) =>
       ri === roundIdx
-        ? round.map((m) => (m.id === matchId ? { ...m, homeScore: parseInt(homeScore), awayScore: parseInt(awayScore), setScores: setScores || null, completed: true, ...(extra || {}) } : m))
+        ? round.map((m) => (m.id === matchId ? {
+            ...m,
+            ...(isScheduleOnly ? {} : { homeScore: parseInt(homeScore), awayScore: parseInt(awayScore), setScores: setScores || null, completed: true }),
+            ...(extra || {}),
+          } : m))
         : round
     );
     // Auto-complete if this was the final and no 3rd place match pending
@@ -4095,14 +4105,27 @@ function ScoreModal({ match, homeName, awayName, isAmericano, format, onSave, on
     return true;
   };
 
+  const hasScheduleInfo = court !== "" || matchTime !== "";
+  const hasScore = !isSetMode ? (s1 !== "" && s2 !== "") : (sets[0].h !== "" && sets[0].a !== "");
+
   const handleSave = () => {
     const extra = { court, matchTime };
     if (!isSetMode) {
+      // 스코어 없이 경기시간/코트만 저장하는 경우
+      if (s1 === "" && s2 === "" && hasScheduleInfo) {
+        onSave("", "", null, { ...extra, completed: false });
+        return;
+      }
       onSave(s1, s2, null, extra);
       return;
     }
     // Filter out empty sets
     const filledSets = sets.filter((s) => s.h !== "" && s.a !== "").map((s) => ({ h: parseInt(s.h), a: parseInt(s.a) }));
+    // 스코어 없이 경기시간/코트만 저장
+    if (filledSets.length === 0 && hasScheduleInfo) {
+      onSave("", "", null, { ...extra, completed: false });
+      return;
+    }
     const { hWins, aWins } = calcSetWins();
     onSave(hWins, aWins, filledSets, extra);
   };
@@ -4139,7 +4162,7 @@ function ScoreModal({ match, homeName, awayName, isAmericano, format, onSave, on
           </div>
           <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
             <Btn variant="outline" onClick={onClose}>{T("cancel")}</Btn>
-            <Btn onClick={handleSave} disabled={isSetMode ? (sets[0].h === "" || sets[0].a === "") : (s1 === "" || s2 === "")}>{T("saveScore")}</Btn>
+            <Btn onClick={handleSave} disabled={!hasScore && !hasScheduleInfo}>{T("saveScore")}</Btn>
           </div>
         </div>
       </Modal>
@@ -4205,7 +4228,7 @@ function ScoreModal({ match, homeName, awayName, isAmericano, format, onSave, on
 
         <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
           <Btn variant="outline" onClick={onClose}>{T("cancel")}</Btn>
-          <Btn onClick={handleSave} disabled={!canSaveSet()}>{T("saveScore")}</Btn>
+          <Btn onClick={handleSave} disabled={!canSaveSet() && !hasScheduleInfo}>{T("saveScore")}</Btn>
         </div>
       </div>
     </Modal>
