@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
+const APP_VERSION = "2.0";
+
 // ============================================================
 // INTERNATIONALIZATION
 // ============================================================
@@ -448,13 +450,15 @@ const loadFromFirestore = async (docId) => {
 
 const saveToFirestore = async (docId, list) => {
   try {
-    if (!fsDb) return;
+    if (!fsDb) { console.warn("[save] fsDb not ready, skipping:", docId); return; }
+    console.log("[save]", docId, "items:", list.length);
     await fsDb.collection(FS_COLLECTION).doc(docId).set({
       items: JSON.parse(JSON.stringify(list)),
       updatedAt: new Date().toISOString()
     });
+    console.log("[save]", docId, "✓ saved");
   } catch (e) {
-    console.error("Firestore save error (" + docId + "):", e);
+    console.error("[save] Firestore save FAILED (" + docId + "):", e);
   }
 };
 
@@ -1192,6 +1196,7 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flexShrink: 0 }} onClick={() => { setPage("home"); setSelectedTournament(null); }}>
               <Icon name="trophy" size={24} />
               <span style={{ fontSize: 17, fontWeight: 700, whiteSpace: "nowrap" }}>{lang === "ko" ? "빠소" : "PSoc"}</span>
+              <span style={{ fontSize: 9, opacity: 0.5, marginLeft: 4 }}>v{APP_VERSION}</span>
             </div>
             <nav style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap" }}>
               <NavBtn active={page === "home"} onClick={() => { setPage("home"); setSelectedTournament(null); }}>{T("home")}</NavBtn>
