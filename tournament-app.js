@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.6";
+const APP_VERSION = "2.7";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -26,7 +26,8 @@ const translations = {
     league: "리그",
     americano: "아메리카노",
     americanoType: "아메리카노 유형",
-    americanoNormal: "일반 아메리카노",
+    americanoNormal: "아메리카노",
+    americanoMexicano: "멕시카노",
     americanoTeam: "팀 아메리카노",
     roundRobinGames: "라운드로빈 게임 수",
     knockoutFormat: "녹아웃 스테이지 포맷",
@@ -231,7 +232,8 @@ const translations = {
     league: "League",
     americano: "Americano",
     americanoType: "Americano Type",
-    americanoNormal: "Normal Americano",
+    americanoNormal: "Americano",
+    americanoMexicano: "Mexicano",
     americanoTeam: "Team Americano",
     roundRobinGames: "Round Robin Games",
     knockoutFormat: "Knockout Stage Format",
@@ -792,8 +794,58 @@ function generateKnockoutBracket(teamIds, roundName) {
 // ============================================================
 // AMERICANO LOGIC
 // ============================================================
-function generateAmericanoRounds(players, numRounds, isTeam = false) {
+// 멕시카노: 순위 기반으로 다음 라운드 매칭 생성
+function generateMexicanoNextRound(players, completedRounds) {
+  // 현재 순위 계산
+  const stats = {};
+  players.forEach((p) => { stats[p.id] = { player: p, points: 0 }; });
+  completedRounds.forEach((round) =>
+    round.forEach((m) => {
+      if (!m.completed) return;
+      m.team1.forEach((pid) => { if (stats[pid]) stats[pid].points += m.team1Score || 0; });
+      m.team2.forEach((pid) => { if (stats[pid]) stats[pid].points += m.team2Score || 0; });
+    })
+  );
+
+  // 포인트 순으로 정렬
+  const sorted = Object.values(stats).sort((a, b) => b.points - a.points);
+  const matches = [];
+
+  // 순위 기반 매칭: 1+4 vs 2+3, 5+8 vs 6+7, ...
+  for (let i = 0; i < sorted.length - 3; i += 4) {
+    const a = sorted[i], b = sorted[i + 3], c = sorted[i + 1], d = sorted[i + 2];
+    matches.push({
+      id: generateId(),
+      team1: [a.player.id, b.player.id],
+      team2: [c.player.id, d.player.id],
+      team1Score: null,
+      team2Score: null,
+      completed: false,
+    });
+  }
+  return matches;
+}
+
+function generateAmericanoRounds(players, numRounds, isTeam = false, isMexicano = false) {
   const n = players.length;
+
+  // 멕시카노: 첫 라운드만 랜덤, 나머지는 경기 후 순위 기반으로 생성
+  if (isMexicano) {
+    const shuffled = [...players].sort(() => Math.random() - 0.5);
+    const firstRound = [];
+    for (let i = 0; i < shuffled.length - 3; i += 4) {
+      firstRound.push({
+        id: generateId(),
+        team1: [shuffled[i].id, shuffled[i + 1].id],
+        team2: [shuffled[i + 2].id, shuffled[i + 3].id],
+        team1Score: null,
+        team2Score: null,
+        completed: false,
+      });
+    }
+    return { rounds: [firstRound], totalRounds: numRounds };
+  }
+
   if (isTeam) {
     // Team americano: fixed pairs, rotate opponents
     const teams = [];
@@ -1959,7 +2011,7 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
           <>
             <FormField label={T("americanoType")}>
               <div style={{ display: "flex", gap: 8 }}>
-                {["normal", "team"].map((at) => (
+                {["normal", "mexicano", "team"].map((at) => (
                   <button
                     key={at}
                     onClick={() => set("americanoType", at)}
@@ -1968,9 +2020,10 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
                       border: `2px solid ${form.americanoType === at ? colors.primary : colors.gray200}`,
                       background: form.americanoType === at ? colors.primaryLight : colors.white,
                       color: form.americanoType === at ? colors.primary : colors.gray600,
+                      fontSize: 13,
                     }}
                   >
-                    {at === "normal" ? T("americanoNormal") : T("americanoTeam")}
+                    {at === "normal" ? T("americanoNormal") : at === "mexicano" ? T("americanoMexicano") : T("americanoTeam")}
                   </button>
                 ))}
               </div>
@@ -2234,7 +2287,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
 
     if (tournament.type === "americano") {
       const players = confirmedRegs.map((r) => ({ id: r.id, name: r.playerName }));
-      updates.americanoData = { ...generateAmericanoRounds(players, parseInt(tournament.americanoRounds) || 6, tournament.americanoType === "team"), players };
+      updates.americanoData = { ...generateAmericanoRounds(players, parseInt(tournament.americanoRounds) || 6, tournament.americanoType === "team", tournament.americanoType === "mexicano"), players };
     } else if (needsGroupDraw(tournament.type, maxT)) {
       // Don't auto-generate groups — let admin use Draw button or manual assignment
     } else {
@@ -2415,7 +2468,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
               )}
               {tournament.type === "americano" && (
                 <>
-                  <div><strong>{T("americanoType")}:</strong> {tournament.americanoType === "normal" ? T("americanoNormal") : T("americanoTeam")}</div>
+                  <div><strong>{T("americanoType")}:</strong> {tournament.americanoType === "mexicano" ? T("americanoMexicano") : tournament.americanoType === "team" ? T("americanoTeam") : T("americanoNormal")}</div>
                   <div><strong>{T("americanoRounds")}:</strong> {tournament.americanoRounds}</div>
                   <div><strong>{T("americanoPointsPerMatch")}:</strong> {tournament.americanoPointsPerMatch}</div>
                 </>
@@ -3158,6 +3211,18 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
         ? round.map((m) => (m.id === matchId ? { ...m, team1Score: parseInt(team1Score), team2Score: parseInt(team2Score), completed: true } : m))
         : round
     );
+
+    // 멕시카노: 현재 라운드 완료 시 다음 라운드 자동 생성 (순위 기반)
+    if (tournament.americanoType === "mexicano") {
+      const currentRound = data.rounds[roundIdx];
+      const allCompleted = currentRound.every((m) => m.completed);
+      const totalRounds = data.totalRounds || parseInt(tournament.americanoRounds) || 6;
+      if (allCompleted && data.rounds.length < totalRounds) {
+        const nextRound = generateMexicanoNextRound(data.players, data.rounds);
+        data.rounds = [...data.rounds, nextRound];
+      }
+    }
+
     updateData({ americanoData: data });
     setScoreModal(null);
   };
