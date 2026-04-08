@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.1";
+const APP_VERSION = "2.2";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -438,8 +438,17 @@ const loadFromFirestore = async (docId) => {
     if (!fsDb) return null;
     const doc = await fsDb.collection(FS_COLLECTION).doc(docId).get();
     if (doc.exists) {
-      const data = doc.data();
-      return { items: data.items || [], updatedAt: data.updatedAt || null };
+      const raw = doc.data();
+      // 새 형식 (JSON 문자열) 또는 구 형식 (items 배열) 모두 지원
+      let items;
+      if (raw.data) {
+        items = JSON.parse(raw.data);
+      } else if (raw.items) {
+        items = raw.items;
+      } else {
+        items = [];
+      }
+      return { items, updatedAt: raw.updatedAt || null };
     }
     return null;
   } catch (e) {
@@ -468,11 +477,12 @@ const showSaveStatus = (msg, isError) => {
 const saveToFirestore = async (docId, list) => {
   try {
     if (!fsDb) { showSaveStatus("DB 연결 안됨!", true); return false; }
+    // Firestore는 중첩 배열을 지원하지 않으므로 JSON 문자열로 저장
     await fsDb.collection(FS_COLLECTION).doc(docId).set({
-      items: JSON.parse(JSON.stringify(list)),
+      data: JSON.stringify(list),
       updatedAt: new Date().toISOString()
     });
-    showSaveStatus("✓ 저장 완료 (" + docId + ")");
+    showSaveStatus("✓ 저장 완료");
     return true;
   } catch (e) {
     console.error("[save] FAILED:", e);
