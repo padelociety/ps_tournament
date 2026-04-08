@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.4";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1585,6 +1585,27 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
     </Card>
   );
 
+  const renderPastCard = (t) => (
+    <div key={t.id} onClick={() => onSelect(t)} style={{
+      display: "flex", alignItems: "center", gap: 12, padding: "10px 14px",
+      background: colors.white, borderRadius: 8, border: `1px solid ${colors.gray200}`,
+      cursor: "pointer", transition: "all 0.15s",
+    }}>
+      <div style={{ display: "flex", gap: 4 }}>
+        <span style={{ padding: "2px 6px", borderRadius: 4, fontSize: 10, fontWeight: 700, color: colors.white, backgroundColor: typeColors[t.type] }}>
+          {T(t.type)}
+        </span>
+        {t.grade && (
+          <span style={{ padding: "2px 6px", borderRadius: 4, fontSize: 10, fontWeight: 700, color: colors.white, backgroundColor: GRADE_COLORS[t.grade] || colors.gray400 }}>
+            {T("grade" + t.grade.charAt(0).toUpperCase() + t.grade.slice(1))}
+          </span>
+        )}
+      </div>
+      <span style={{ fontSize: 14, fontWeight: 600, color: colors.gray700, flex: 1 }}>{t.name}</span>
+      <span style={{ fontSize: 12, color: colors.gray400, whiteSpace: "nowrap" }}>{formatDate(t.date, lang)}</span>
+    </div>
+  );
+
   return (
     <div>
       <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.gray800, marginBottom: 20 }}>{T("tournaments")}</h2>
@@ -1596,8 +1617,8 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
       {past.length > 0 && (
         <div style={{ marginTop: 32 }}>
           <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.gray500, marginBottom: 12 }}>{T("pastTournaments")}</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16, opacity: 0.7 }}>
-            {past.map(renderCard)}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {past.map(renderPastCard)}
           </div>
         </div>
       )}
