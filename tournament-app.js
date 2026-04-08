@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -3316,6 +3316,14 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     onUpdateTournament(tournament.id, { stage: "completed" });
   };
 
+  // 대진표 재설정 (라운드 전체 초기화 후 첫 라운드 새로 생성)
+  const resetAmericano = () => {
+    if (!americanoData?.players) return;
+    const players = americanoData.players;
+    const data = generateAmericanoRounds(players, 1, tournament.americanoType === "team", tournament.americanoType === "mexicano");
+    updateData({ americanoData: { ...data, players } });
+  };
+
   // AMERICANO VIEW
   if (tournament.type === "americano" && americanoData) {
     const { rounds, players } = americanoData;
@@ -3323,6 +3331,14 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
 
     return (
       <div>
+        {/* 관리자: 대진표 재설정 */}
+        {isAdmin && tournament.stage === "ongoing" && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            <Btn size="sm" variant="outline" onClick={resetAmericano}>
+              {lang === "ko" ? "대진표 재설정" : "Reset Bracket"}
+            </Btn>
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           {/* Rounds */}
