@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.5";
+const APP_VERSION = "2.6";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -793,7 +793,6 @@ function generateKnockoutBracket(teamIds, roundName) {
 // AMERICANO LOGIC
 // ============================================================
 function generateAmericanoRounds(players, numRounds, isTeam = false) {
-  const rounds = [];
   const n = players.length;
   if (isTeam) {
     // Team americano: fixed pairs, rotate opponents
@@ -804,23 +803,69 @@ function generateAmericanoRounds(players, numRounds, isTeam = false) {
     const schedule = generateRoundRobinSchedule(teams);
     return { teams, rounds: schedule.slice(0, numRounds) };
   }
-  // Normal americano: random partners each round
+
+  // Normal americano: 파트너/상대 중복 최소화
+  const pairKey = (a, b) => [a, b].sort().join("-");
+  const partnerCount = {};
+  const opponentCount = {};
+  const rounds = [];
+
   for (let r = 0; r < numRounds; r++) {
-    const shuffled = [...players].sort(() => Math.random() - 0.5);
-    const matches = [];
-    for (let i = 0; i < shuffled.length; i += 4) {
-      if (i + 3 < shuffled.length) {
+    let bestMatches = null;
+    let bestScore = Infinity;
+
+    // 여러 랜덤 조합을 시도하고 중복이 가장 적은 것 선택
+    const attempts = Math.min(200, 50 + n * 10);
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const shuffled = [...players].sort(() => Math.random() - 0.5);
+      const matches = [];
+      let score = 0;
+
+      for (let i = 0; i < shuffled.length - 3; i += 4) {
+        const a = shuffled[i], b = shuffled[i + 1], c = shuffled[i + 2], d = shuffled[i + 3];
+        // 파트너 중복 (가중치 높음)
+        score += (partnerCount[pairKey(a.id, b.id)] || 0) * 5;
+        score += (partnerCount[pairKey(c.id, d.id)] || 0) * 5;
+        // 상대 중복
+        score += (opponentCount[pairKey(a.id, c.id)] || 0);
+        score += (opponentCount[pairKey(a.id, d.id)] || 0);
+        score += (opponentCount[pairKey(b.id, c.id)] || 0);
+        score += (opponentCount[pairKey(b.id, d.id)] || 0);
+
         matches.push({
           id: generateId(),
-          team1: [shuffled[i].id, shuffled[i + 1].id],
-          team2: [shuffled[i + 2].id, shuffled[i + 3].id],
+          team1: [a.id, b.id],
+          team2: [c.id, d.id],
           team1Score: null,
           team2Score: null,
           completed: false,
         });
       }
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestMatches = matches;
+      }
+      if (score === 0) break;
     }
-    rounds.push(matches);
+
+    // 선택된 매칭의 파트너/상대 카운트 업데이트
+    if (bestMatches) {
+      bestMatches.forEach((m) => {
+        const pk1 = pairKey(m.team1[0], m.team1[1]);
+        const pk2 = pairKey(m.team2[0], m.team2[1]);
+        partnerCount[pk1] = (partnerCount[pk1] || 0) + 1;
+        partnerCount[pk2] = (partnerCount[pk2] || 0) + 1;
+        // 상대: 팀1 각자 vs 팀2 각자
+        m.team1.forEach((p1) => m.team2.forEach((p2) => {
+          const ok = pairKey(p1, p2);
+          opponentCount[ok] = (opponentCount[ok] || 0) + 1;
+        }));
+      });
+      // id를 새로 생성 (같은 attempt의 id가 겹치지 않도록)
+      bestMatches = bestMatches.map((m) => ({ ...m, id: generateId() }));
+      rounds.push(bestMatches);
+    }
   }
   return { rounds };
 }
@@ -1932,7 +1977,13 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
             </FormField>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               <FormField label={T("americanoPlayers")}>
-                <select value={form.americanoPlayers} onChange={(e) => set("americanoPlayers", e.target.value)} style={inputStyle}>
+                <select value={form.americanoPlayers} onChange={(e) => {
+                  const p = parseInt(e.target.value);
+                  set("americanoPlayers", e.target.value);
+                  // 추천 라운드 수 자동 설정: (인원-1) 라운드, 최소 4, 최대 12
+                  const recommended = Math.min(12, Math.max(4, p - 1));
+                  set("americanoRounds", String(recommended));
+                }} style={inputStyle}>
                   {[4, 8, 12, 16, 20].map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </FormField>
