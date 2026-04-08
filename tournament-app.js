@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.7";
+const APP_VERSION = "2.8";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1010,7 +1010,20 @@ const Icon = ({ name, size = 20 }) => {
 // ============================================================
 // STYLES
 // ============================================================
-const ADMIN_PASSWORD = "1234";
+// 비밀번호 해시 비교 (SHA-256)
+const hashPassword = async (pw) => {
+  const encoded = new TextEncoder().encode(pw);
+  const buffer = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(buffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+const loadAdminPasswordHash = async () => {
+  try {
+    if (!fsDb) return null;
+    const doc = await fsDb.collection(FS_COLLECTION).doc("config").get();
+    if (doc.exists) return doc.data().passwordHash || null;
+    return null;
+  } catch { return null; }
+};
 
 const colors = {
   primary: "#104734",
@@ -1165,6 +1178,23 @@ export default function App() {
   }, [dataLoaded]);
 
   const T = useCallback((key) => t(lang, key), [lang]);
+
+  // 관리자 로그인 (Firestore 해시 비교)
+  const tryAdminLogin = async () => {
+    const storedHash = await loadAdminPasswordHash();
+    const inputHash = await hashPassword(adminPasswordInput);
+    if (storedHash && inputHash === storedHash) {
+      setIsAdminAuthenticated(true);
+      setIsAdmin(true);
+      setPage(pendingAdminPage);
+      setSelectedTournament(null);
+      setShowAdminPasswordModal(false);
+      setAdminPasswordInput("");
+    } else {
+      setToastMessage(T("wrongPassword"));
+      setTimeout(() => setToastMessage(""), 2000);
+    }
+  };
 
   // Player CRUD — Firestore 저장 완료 후 상태 업데이트
   const addPlayer = (player) => {
@@ -1449,21 +1479,7 @@ export default function App() {
                   type="password"
                   value={adminPasswordInput}
                   onChange={(e) => setAdminPasswordInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (adminPasswordInput === ADMIN_PASSWORD) {
-                        setIsAdminAuthenticated(true);
-                        setIsAdmin(true);
-                        setPage("admin");
-                        setSelectedTournament(null);
-                        setShowAdminPasswordModal(false);
-                        setAdminPasswordInput("");
-                      } else {
-                        setToastMessage(T("wrongPassword"));
-                        setTimeout(() => setToastMessage(""), 2000);
-                      }
-                    }
-                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") tryAdminLogin(); }}
                   style={inputStyle}
                   autoFocus
                   placeholder="****"
@@ -1471,19 +1487,7 @@ export default function App() {
               </FormField>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
                 <Btn variant="outline" onClick={() => { setShowAdminPasswordModal(false); setAdminPasswordInput(""); }}>{T("cancel")}</Btn>
-                <Btn onClick={() => {
-                  if (adminPasswordInput === ADMIN_PASSWORD) {
-                    setIsAdminAuthenticated(true);
-                    setIsAdmin(true);
-                    setPage(pendingAdminPage);
-                    setSelectedTournament(null);
-                    setShowAdminPasswordModal(false);
-                    setAdminPasswordInput("");
-                  } else {
-                    setToastMessage(T("wrongPassword"));
-                    setTimeout(() => setToastMessage(""), 2000);
-                  }
-                }}>{T("login")}</Btn>
+                <Btn onClick={tryAdminLogin}>{T("login")}</Btn>
               </div>
             </div>
           </Modal>
@@ -2037,7 +2041,7 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
                   const recommended = Math.min(12, Math.max(4, p - 1));
                   set("americanoRounds", String(recommended));
                 }} style={inputStyle}>
-                  {[4, 8, 12, 16, 20].map((n) => <option key={n} value={n}>{n}</option>)}
+                  {[4,6,8,10,12,14,16,18,20].map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </FormField>
               <FormField label={T("americanoRounds")}>
