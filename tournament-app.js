@@ -978,7 +978,23 @@ export default function App() {
     load();
   }, []);
 
-  // 데이터 변경 시 Firestore에만 저장 (로드 완료 후에만)
+  // 데이터 변경 시 Firestore에 즉시 저장 (로드 완료 후에만)
+  const saveRef = useRef({ dataLoaded: false });
+  saveRef.current.dataLoaded = dataLoaded;
+
+  const saveTournamentsNow = useCallback(async (list) => {
+    if (!saveRef.current.dataLoaded) return;
+    await saveToFirestore("tournaments", list);
+  }, []);
+  const savePlayersNow = useCallback(async (list) => {
+    if (!saveRef.current.dataLoaded) return;
+    await saveToFirestore("players", list);
+  }, []);
+  const saveRankingsNow = useCallback(async (list) => {
+    if (!saveRef.current.dataLoaded) return;
+    await saveToFirestore("rankings", list);
+  }, []);
+
   useEffect(() => {
     if (!dataLoaded) return;
     saveToFirestore("tournaments", tournaments);
@@ -1011,12 +1027,26 @@ export default function App() {
   const T = useCallback((key) => t(lang, key), [lang]);
 
   // Player CRUD
-  const addPlayer = (player) => setPlayers((prev) => [...prev, { ...player, id: generateId(), createdAt: new Date().toISOString() }]);
-  const updatePlayer = (id, updates) => setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
-  const deletePlayer = (id) => setPlayers((prev) => prev.filter((p) => p.id !== id));
+  const addPlayer = (player) => {
+    let next;
+    setPlayers((prev) => { next = [...prev, { ...player, id: generateId(), createdAt: new Date().toISOString() }]; return next; });
+    setTimeout(() => next && savePlayersNow(next), 0);
+  };
+  const updatePlayer = (id, updates) => {
+    let next;
+    setPlayers((prev) => { next = prev.map((p) => (p.id === id ? { ...p, ...updates } : p)); return next; });
+    setTimeout(() => next && savePlayersNow(next), 0);
+  };
+  const deletePlayer = (id) => {
+    let next;
+    setPlayers((prev) => { next = prev.filter((p) => p.id !== id); return next; });
+    setTimeout(() => next && savePlayersNow(next), 0);
+  };
 
   const addTournament = (tournament) => {
-    setTournaments((prev) => [...prev, { ...tournament, id: generateId(), registrations: [], stage: "registration" }]);
+    let next;
+    setTournaments((prev) => { next = [...prev, { ...tournament, id: generateId(), registrations: [], stage: "registration" }]; return next; });
+    setTimeout(() => next && saveTournamentsNow(next), 0);
     setShowCreateForm(false);
   };
 
@@ -1095,24 +1125,29 @@ export default function App() {
   }, [tournaments, players]);
 
   const updateTournament = (id, updates) => {
+    let nextList;
     setTournaments((prev) => {
-      const next = prev.map((t) => (t.id === id ? { ...t, ...updates } : t));
+      nextList = prev.map((t) => (t.id === id ? { ...t, ...updates } : t));
       // Auto-award points when tournament completes
       if (updates.stage === "completed") {
-        const completed = next.find((t) => t.id === id);
+        const completed = nextList.find((t) => t.id === id);
         if (completed) {
           setTimeout(() => awardPoints(completed), 0);
         }
       }
-      return next;
+      return nextList;
     });
+    // Firestore에 즉시 저장 (useEffect 대기 없이)
+    if (nextList) saveTournamentsNow(nextList);
     if (selectedTournament?.id === id) {
       setSelectedTournament((prev) => ({ ...prev, ...updates }));
     }
   };
 
   const deleteTournament = (id) => {
-    setTournaments((prev) => prev.filter((t) => t.id !== id));
+    let next;
+    setTournaments((prev) => { next = prev.filter((t) => t.id !== id); return next; });
+    setTimeout(() => next && saveTournamentsNow(next), 0);
     if (selectedTournament?.id === id) {
       setSelectedTournament(null);
       setPage("home");
