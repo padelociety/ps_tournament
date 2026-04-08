@@ -978,75 +978,70 @@ export default function App() {
     load();
   }, []);
 
-  // 데이터 변경 시 Firestore에 즉시 저장 (로드 완료 후에만)
-  const saveRef = useRef({ dataLoaded: false });
-  saveRef.current.dataLoaded = dataLoaded;
+  // Firestore 저장 후 React 상태 업데이트 헬퍼
+  const tournamentsRef = useRef(tournaments);
+  tournamentsRef.current = tournaments;
+  const playersRef = useRef(players);
+  playersRef.current = players;
+  const rankingsRef = useRef(rankings);
+  rankingsRef.current = rankings;
 
-  const saveTournamentsNow = useCallback(async (list) => {
-    if (!saveRef.current.dataLoaded) return;
-    await saveToFirestore("tournaments", list);
-  }, []);
-  const savePlayersNow = useCallback(async (list) => {
-    if (!saveRef.current.dataLoaded) return;
-    await saveToFirestore("players", list);
-  }, []);
-  const saveRankingsNow = useCallback(async (list) => {
-    if (!saveRef.current.dataLoaded) return;
-    await saveToFirestore("rankings", list);
+  const updateAndSaveTournaments = useCallback(async (updater) => {
+    const next = typeof updater === "function" ? updater(tournamentsRef.current) : updater;
+    await saveToFirestore("tournaments", next);
+    setTournaments(next);
+    tournamentsRef.current = next;
+    return next;
   }, []);
 
-  useEffect(() => {
-    if (!dataLoaded) return;
-    saveToFirestore("tournaments", tournaments);
-  }, [tournaments]);
-  useEffect(() => {
-    if (!dataLoaded) return;
-    saveToFirestore("players", players);
-  }, [players]);
-  useEffect(() => {
-    if (!dataLoaded) return;
-    saveToFirestore("rankings", rankings);
-  }, [rankings]);
+  const updateAndSavePlayers = useCallback(async (updater) => {
+    const next = typeof updater === "function" ? updater(playersRef.current) : updater;
+    await saveToFirestore("players", next);
+    setPlayers(next);
+    playersRef.current = next;
+    return next;
+  }, []);
+
+  const updateAndSaveRankings = useCallback(async (updater) => {
+    const next = typeof updater === "function" ? updater(rankingsRef.current) : updater;
+    await saveToFirestore("rankings", next);
+    setRankings(next);
+    rankingsRef.current = next;
+    return next;
+  }, []);
 
   // Check and auto-close registration when deadline passes
   useEffect(() => {
-    setTournaments((prev) =>
-      prev.map((t) => {
-        if (t.stage === "registration" && t.registrationDeadline) {
-          const dl = new Date(t.registrationDeadline);
-          const now = new Date();
-          if (dl < now && !t.registrationClosed) {
-            return { ...t, registrationClosed: true };
-          }
+    if (!dataLoaded) return;
+    const current = tournamentsRef.current;
+    const updated = current.map((t) => {
+      if (t.stage === "registration" && t.registrationDeadline) {
+        const dl = new Date(t.registrationDeadline);
+        if (dl < new Date() && !t.registrationClosed) {
+          return { ...t, registrationClosed: true };
         }
-        return t;
-      })
-    );
-  }, []);
+      }
+      return t;
+    });
+    const changed = updated.some((t, i) => t !== current[i]);
+    if (changed) updateAndSaveTournaments(updated);
+  }, [dataLoaded]);
 
   const T = useCallback((key) => t(lang, key), [lang]);
 
-  // Player CRUD
+  // Player CRUD — Firestore 저장 완료 후 상태 업데이트
   const addPlayer = (player) => {
-    let next;
-    setPlayers((prev) => { next = [...prev, { ...player, id: generateId(), createdAt: new Date().toISOString() }]; return next; });
-    setTimeout(() => next && savePlayersNow(next), 0);
+    updateAndSavePlayers((prev) => [...prev, { ...player, id: generateId(), createdAt: new Date().toISOString() }]);
   };
   const updatePlayer = (id, updates) => {
-    let next;
-    setPlayers((prev) => { next = prev.map((p) => (p.id === id ? { ...p, ...updates } : p)); return next; });
-    setTimeout(() => next && savePlayersNow(next), 0);
+    updateAndSavePlayers((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
   };
   const deletePlayer = (id) => {
-    let next;
-    setPlayers((prev) => { next = prev.filter((p) => p.id !== id); return next; });
-    setTimeout(() => next && savePlayersNow(next), 0);
+    updateAndSavePlayers((prev) => prev.filter((p) => p.id !== id));
   };
 
   const addTournament = (tournament) => {
-    let next;
-    setTournaments((prev) => { next = [...prev, { ...tournament, id: generateId(), registrations: [], stage: "registration" }]; return next; });
-    setTimeout(() => next && saveTournamentsNow(next), 0);
+    updateAndSaveTournaments((prev) => [...prev, { ...tournament, id: generateId(), registrations: [], stage: "registration" }]);
     setShowCreateForm(false);
   };
 
@@ -1084,10 +1079,9 @@ export default function App() {
     }));
 
     if (forceRecalc) {
-      // Remove old entries for this tournament and replace with new
-      setRankings((prev) => [...prev.filter((r) => r.tournamentId !== tournament.id), ...newEntries]);
+      updateAndSaveRankings((prev) => [...prev.filter((r) => r.tournamentId !== tournament.id), ...newEntries]);
     } else {
-      setRankings((prev) => [...prev, ...newEntries]);
+      updateAndSaveRankings((prev) => [...prev, ...newEntries]);
     }
   }, [rankings]);
 
@@ -1121,33 +1115,31 @@ export default function App() {
         });
       });
     });
-    setRankings(allEntries);
+    updateAndSaveRankings(allEntries);
   }, [tournaments, players]);
 
-  const updateTournament = (id, updates) => {
-    let nextList;
-    setTournaments((prev) => {
-      nextList = prev.map((t) => (t.id === id ? { ...t, ...updates } : t));
-      // Auto-award points when tournament completes
-      if (updates.stage === "completed") {
-        const completed = nextList.find((t) => t.id === id);
-        if (completed) {
-          setTimeout(() => awardPoints(completed), 0);
-        }
-      }
-      return nextList;
-    });
-    // Firestore에 즉시 저장 (useEffect 대기 없이)
-    if (nextList) saveTournamentsNow(nextList);
+  const updateTournament = async (id, updates) => {
+    const nextList = tournamentsRef.current.map((t) => (t.id === id ? { ...t, ...updates } : t));
+    // Firestore에 먼저 저장
+    await saveToFirestore("tournaments", nextList);
+    // 저장 성공 후 React 상태 업데이트
+    setTournaments(nextList);
+    tournamentsRef.current = nextList;
+    // Auto-award points when tournament completes
+    if (updates.stage === "completed") {
+      const completed = nextList.find((t) => t.id === id);
+      if (completed) setTimeout(() => awardPoints(completed), 0);
+    }
     if (selectedTournament?.id === id) {
       setSelectedTournament((prev) => ({ ...prev, ...updates }));
     }
   };
 
-  const deleteTournament = (id) => {
-    let next;
-    setTournaments((prev) => { next = prev.filter((t) => t.id !== id); return next; });
-    setTimeout(() => next && saveTournamentsNow(next), 0);
+  const deleteTournament = async (id) => {
+    const next = tournamentsRef.current.filter((t) => t.id !== id);
+    await saveToFirestore("tournaments", next);
+    setTournaments(next);
+    tournamentsRef.current = next;
     if (selectedTournament?.id === id) {
       setSelectedTournament(null);
       setPage("home");
@@ -1155,7 +1147,7 @@ export default function App() {
   };
 
   const confirmPayment = (tournamentId, regId) => {
-    setTournaments((prev) =>
+    updateAndSaveTournaments((prev) =>
       prev.map((t) =>
         t.id === tournamentId
           ? { ...t, registrations: t.registrations.map((r) => (r.id === regId ? { ...r, status: "confirmed" } : r)) }
@@ -1165,7 +1157,7 @@ export default function App() {
   };
 
   const rejectRegistration = (tournamentId, regId) => {
-    setTournaments((prev) =>
+    updateAndSaveTournaments((prev) =>
       prev.map((t) =>
         t.id === tournamentId
           ? { ...t, registrations: t.registrations.filter((r) => r.id !== regId) }
@@ -1176,7 +1168,7 @@ export default function App() {
 
   const submitRegistration = (tournamentId, regData) => {
     const reg = { ...regData, id: generateId(), status: "pending", registeredAt: new Date().toISOString() };
-    setTournaments((prev) =>
+    updateAndSaveTournaments((prev) =>
       prev.map((t) => (t.id === tournamentId ? { ...t, registrations: [...t.registrations, reg] } : t))
     );
     return reg;
