@@ -92,13 +92,18 @@ window.addEventListener("beforeinstallprompt", (e) => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("tournament_sw.js", { updateViaCache: "none" }).then((reg) => {
-      // 주기적으로 업데이트 확인 (1시간마다)
-      setInterval(() => reg.update(), 60 * 60 * 1000);
+      // 즉시 업데이트 확인 + 5분마다 재확인
+      reg.update();
+      setInterval(() => reg.update(), 5 * 60 * 1000);
       // 새 SW가 대기 중이면 즉시 활성화
+      if (reg.waiting) { reg.waiting.postMessage({ type: "SKIP_WAITING" }); }
       reg.addEventListener("updatefound", () => {
         const newSW = reg.installing;
         if (newSW) {
           newSW.addEventListener("statechange", () => {
+            if (newSW.state === "installed" && navigator.serviceWorker.controller) {
+              newSW.postMessage({ type: "SKIP_WAITING" });
+            }
             if (newSW.state === "activated") {
               window.location.reload();
             }
