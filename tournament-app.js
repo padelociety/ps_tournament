@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "2.8";
+const APP_VERSION = "2.9";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -795,7 +795,7 @@ function generateKnockoutBracket(teamIds, roundName) {
 // AMERICANO LOGIC
 // ============================================================
 // 멕시카노: 순위 기반으로 다음 라운드 매칭 생성
-function generateMexicanoNextRound(players, completedRounds) {
+function generateMexicanoNextRound(players, completedRounds, byeTracker) {
   // 현재 순위 계산
   const stats = {};
   players.forEach((p) => { stats[p.id] = { player: p, points: 0 }; });
@@ -807,8 +807,17 @@ function generateMexicanoNextRound(players, completedRounds) {
     })
   );
 
-  // 포인트 순으로 정렬
-  const sorted = Object.values(stats).sort((a, b) => b.points - a.points);
+  const n = players.length;
+  const byePerRound = n % 4;
+  const bt = byeTracker || {};
+
+  // bye 처리
+  const { active, byes } = selectPlayersForRound(players, byePerRound, bt);
+  byes.forEach((p) => { bt[p.id] = (bt[p.id] || 0) + 1; });
+
+  // 포인트 순으로 정렬 (active만)
+  const activeIds = new Set(active.map((p) => p.id));
+  const sorted = Object.values(stats).filter((s) => activeIds.has(s.player.id)).sort((a, b) => b.points - a.points);
   const matches = [];
 
   // 순위 기반 매칭: 1+4 vs 2+3, 5+8 vs 6+7, ...
@@ -826,28 +835,44 @@ function generateMexicanoNextRound(players, completedRounds) {
   return matches;
 }
 
+// 4명씩 매칭 가능한 인원 선택 (홀수/나머지 인원은 bye)
+function selectPlayersForRound(players, byeCount, prevByes) {
+  if (byeCount === 0) return { active: [...players], byes: [] };
+  // 이전에 쉰 횟수가 적은 사람 우선으로 bye
+  const sorted = [...players].sort((a, b) => (prevByes[a.id] || 0) - (prevByes[b.id] || 0));
+  const byes = sorted.slice(0, byeCount);
+  const byeIds = new Set(byes.map((p) => p.id));
+  const active = players.filter((p) => !byeIds.has(p.id));
+  return { active, byes };
+}
+
 function generateAmericanoRounds(players, numRounds, isTeam = false, isMexicano = false) {
   const n = players.length;
+  // 라운드 수 자동 계산: 인원-1, 최소 4, 최대 12
+  if (!numRounds || numRounds <= 0) numRounds = Math.min(12, Math.max(4, n - 1));
+  const remainder = n % 4;
+  const byePerRound = remainder; // 0이면 bye 없음
+  const byeTracker = {}; // playerId → 쉰 횟수
+  players.forEach((p) => { byeTracker[p.id] = 0; });
 
   // 멕시카노: 첫 라운드만 랜덤, 나머지는 경기 후 순위 기반으로 생성
   if (isMexicano) {
-    const shuffled = [...players].sort(() => Math.random() - 0.5);
+    const { active, byes } = selectPlayersForRound(players, byePerRound, byeTracker);
+    byes.forEach((p) => { byeTracker[p.id]++; });
+    const shuffled = [...active].sort(() => Math.random() - 0.5);
     const firstRound = [];
     for (let i = 0; i < shuffled.length - 3; i += 4) {
       firstRound.push({
         id: generateId(),
         team1: [shuffled[i].id, shuffled[i + 1].id],
         team2: [shuffled[i + 2].id, shuffled[i + 3].id],
-        team1Score: null,
-        team2Score: null,
-        completed: false,
+        team1Score: null, team2Score: null, completed: false,
       });
     }
-    return { rounds: [firstRound], totalRounds: numRounds };
+    return { rounds: [firstRound], totalRounds: numRounds, byeTracker, byePerRound };
   }
 
   if (isTeam) {
-    // Team americano: fixed pairs, rotate opponents
     const teams = [];
     for (let i = 0; i < n; i += 2) {
       teams.push({ id: generateId(), players: [players[i], players[i + 1]] });
@@ -863,13 +888,15 @@ function generateAmericanoRounds(players, numRounds, isTeam = false, isMexicano 
   const rounds = [];
 
   for (let r = 0; r < numRounds; r++) {
+    const { active, byes } = selectPlayersForRound(players, byePerRound, byeTracker);
+    byes.forEach((p) => { byeTracker[p.id]++; });
+
     let bestMatches = null;
     let bestScore = Infinity;
 
-    // 여러 랜덤 조합을 시도하고 중복이 가장 적은 것 선택
     const attempts = Math.min(200, 50 + n * 10);
     for (let attempt = 0; attempt < attempts; attempt++) {
-      const shuffled = [...players].sort(() => Math.random() - 0.5);
+      const shuffled = [...active].sort(() => Math.random() - 0.5);
       const matches = [];
       let score = 0;
 
@@ -2032,20 +2059,13 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
                 ))}
               </div>
             </FormField>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <FormField label={T("americanoPlayers")}>
                 <select value={form.americanoPlayers} onChange={(e) => {
-                  const p = parseInt(e.target.value);
                   set("americanoPlayers", e.target.value);
-                  // 추천 라운드 수 자동 설정: (인원-1) 라운드, 최소 4, 최대 12
-                  const recommended = Math.min(12, Math.max(4, p - 1));
-                  set("americanoRounds", String(recommended));
                 }} style={inputStyle}>
-                  {[4,6,8,10,12,14,16,18,20].map((n) => <option key={n} value={n}>{n}</option>)}
+                  {Array.from({ length: 17 }, (_, i) => i + 4).map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
-              </FormField>
-              <FormField label={T("americanoRounds")}>
-                <input type="number" value={form.americanoRounds} onChange={(e) => set("americanoRounds", e.target.value)} style={inputStyle} min="1" max="20" />
               </FormField>
               <FormField label={T("americanoPointsPerMatch")}>
                 <input type="number" value={form.americanoPointsPerMatch} onChange={(e) => set("americanoPointsPerMatch", e.target.value)} style={inputStyle} />
@@ -2291,7 +2311,8 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
 
     if (tournament.type === "americano") {
       const players = confirmedRegs.map((r) => ({ id: r.id, name: r.playerName }));
-      updates.americanoData = { ...generateAmericanoRounds(players, parseInt(tournament.americanoRounds) || 6, tournament.americanoType === "team", tournament.americanoType === "mexicano"), players };
+      const autoRounds = Math.min(12, Math.max(4, players.length - 1));
+      updates.americanoData = { ...generateAmericanoRounds(players, autoRounds, tournament.americanoType === "team", tournament.americanoType === "mexicano"), players };
     } else if (needsGroupDraw(tournament.type, maxT)) {
       // Don't auto-generate groups — let admin use Draw button or manual assignment
     } else {
@@ -3220,9 +3241,9 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     if (tournament.americanoType === "mexicano") {
       const currentRound = data.rounds[roundIdx];
       const allCompleted = currentRound.every((m) => m.completed);
-      const totalRounds = data.totalRounds || parseInt(tournament.americanoRounds) || 6;
+      const totalRounds = data.totalRounds || Math.min(12, Math.max(4, data.players.length - 1));
       if (allCompleted && data.rounds.length < totalRounds) {
-        const nextRound = generateMexicanoNextRound(data.players, data.rounds);
+        const nextRound = generateMexicanoNextRound(data.players, data.rounds, data.byeTracker);
         data.rounds = [...data.rounds, nextRound];
       }
     }
