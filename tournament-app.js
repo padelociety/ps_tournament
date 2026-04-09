@@ -2506,53 +2506,62 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
 
       {/* TAB: Info */}
       {tab === "info" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.gray500, marginBottom: 12 }}>{T("description")}</h3>
-            <p style={{ color: colors.gray700, lineHeight: 1.6 }}>{tournament.description || "-"}</p>
-            <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 6, fontSize: 14 }}>
-              <div><strong>{T("date")}:</strong> {formatDate(tournament.date, lang)}</div>
+            {tournament.description && <p style={{ color: colors.gray700, lineHeight: 1.6, marginBottom: 16 }}>{tournament.description}</p>}
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 12px", fontSize: 14, alignItems: "baseline" }}>
+              <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("date")}</span>
+              <span style={{ color: colors.gray800 }}>{formatDate(tournament.date, lang)}</span>
               {tournament.registrationDeadline && (
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <strong>{T("registrationDeadline")}:</strong>
-                  <span>{formatDate(tournament.registrationDeadline, lang)}</span>
-                  {(() => {
-                    const dl = deadlineEndOfDay(tournament.registrationDeadline);
-                    const now = new Date();
-                    const diff = Math.ceil((dl - now) / (1000 * 60 * 60 * 24));
-                    return diff < 0
-                      ? <span style={{ color: colors.danger, fontSize: 12, fontWeight: 600 }}>({T("deadlinePassed")})</span>
-                      : <span style={{ color: colors.warning, fontSize: 12, fontWeight: 600 }}>({diff} {T("daysLeft")})</span>;
-                  })()}
-                </div>
+                <>
+                  <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("registrationDeadline")}</span>
+                  <span style={{ color: colors.gray800 }}>
+                    {formatDate(tournament.registrationDeadline, lang)}
+                    {" "}
+                    {(() => {
+                      const dl = deadlineEndOfDay(tournament.registrationDeadline);
+                      const now = new Date();
+                      const diff = Math.ceil((dl - now) / (1000 * 60 * 60 * 24));
+                      return diff < 0
+                        ? <span style={{ color: colors.danger, fontSize: 12, fontWeight: 600 }}>({T("deadlinePassed")})</span>
+                        : <span style={{ color: colors.warning, fontSize: 12, fontWeight: 600 }}>({diff} {T("daysLeft")})</span>;
+                    })()}
+                  </span>
+                </>
               )}
-              <div><strong>{T("location")}:</strong> {tournament.location || "-"}</div>
-              <div><strong>{T("entryFee")}:</strong> {tournament.entryFee || "-"}</div>
-              <div><strong>{T("maxTeams")}:</strong> {tournament.maxTeams || "-"}</div>
+              <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("location")}</span>
+              <span style={{ color: colors.gray800 }}>{tournament.location || "-"}</span>
+              <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("entryFee")}</span>
+              <span style={{ color: colors.gray800 }}>{tournament.entryFee || "-"}</span>
+              <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("maxTeams")}</span>
+              <span style={{ color: colors.gray800 }}>{tournament.maxTeams || "-"}</span>
               {tournament.type === "open" && (
                 <>
-                  <div><strong>{T("roundRobinGames")}:</strong> {tournament.roundRobinGames} {T("game")}</div>
-                  <div style={{ fontSize: 13 }}>
-                    <strong>{T("knockoutFormats")}:</strong>
-                    <span style={{ marginLeft: 6 }}>
-                      {T("quarterFinals")}: {T(tournament.knockoutFormats?.quarterFinals || "set3")} · {T("semiFinals")}: {T(tournament.knockoutFormats?.semiFinals || "set3")} · {T("final")}: {T(tournament.knockoutFormats?.final || "set3")}
-                    </span>
-                  </div>
+                  <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("roundRobinGames")}</span>
+                  <span style={{ color: colors.gray800 }}>{tournament.roundRobinGames} {T("game")}</span>
+                  <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("knockoutFormats")}</span>
+                  <span style={{ color: colors.gray800, fontSize: 13 }}>
+                    {T("quarterFinals")}: {T(tournament.knockoutFormats?.quarterFinals || "set3")} · {T("semiFinals")}: {T(tournament.knockoutFormats?.semiFinals || "set3")} · {T("final")}: {T(tournament.knockoutFormats?.final || "set3")}
+                  </span>
                 </>
               )}
               {tournament.type === "cup" && (
-                <div style={{ fontSize: 13 }}>
-                  <strong>{T("knockoutFormats")}:</strong>
-                  <span style={{ marginLeft: 6 }}>
+                <>
+                  <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("knockoutFormats")}</span>
+                  <span style={{ color: colors.gray800, fontSize: 13 }}>
                     {T("quarterFinals")}: {T(tournament.knockoutFormats?.quarterFinals || "set3")} · {T("semiFinals")}: {T(tournament.knockoutFormats?.semiFinals || "set3")} · {T("final")}: {T(tournament.knockoutFormats?.final || "set3")}
                   </span>
-                </div>
+                </>
               )}
               {tournament.type === "americano" && (
                 <>
-                  <div><strong>{T("americanoType")}:</strong> {tournament.americanoType === "mexicano" ? T("americanoMexicano") : tournament.americanoType === "team" ? T("americanoTeam") : T("americanoNormal")}</div>
-                  <div><strong>{T("americanoRounds")}:</strong> {tournament.americanoRounds}</div>
-                  <div><strong>{T("americanoPointsPerMatch")}:</strong> {tournament.americanoPointsPerMatch}</div>
+                  <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("americanoType")}</span>
+                  <span style={{ color: colors.gray800 }}>{tournament.americanoType === "mexicano" ? T("americanoMexicano") : tournament.americanoType === "team" ? T("americanoTeam") : T("americanoNormal")}</span>
+                  <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("americanoRounds")}</span>
+                  <span style={{ color: colors.gray800 }}>{tournament.americanoRounds}</span>
+                  <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("americanoPointsPerMatch")}</span>
+                  <span style={{ color: colors.gray800 }}>{tournament.americanoPointsPerMatch}</span>
                 </>
               )}
             </div>
