@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.1";
+const APP_VERSION = "3.3";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1839,7 +1839,14 @@ function AdminPanel({ tournaments, onSelect, onCreate, onEdit, onDelete, onRecal
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {tournaments.map((t) => (
+          {[...tournaments].sort((a, b) => {
+            // 완료된 대회는 밑으로
+            const aFinished = a.stage === "finished" ? 1 : 0;
+            const bFinished = b.stage === "finished" ? 1 : 0;
+            if (aFinished !== bFinished) return aFinished - bFinished;
+            // 날짜 최신순
+            return (b.date || "").localeCompare(a.date || "");
+          }).map((t) => (
             <Card key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ cursor: "pointer", flex: 1 }} onClick={() => onSelect(t)}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
