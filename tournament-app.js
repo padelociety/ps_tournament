@@ -145,7 +145,7 @@ const translations = {
     noCategoriesYet: "카테고리를 추가해주세요",
     categoryFilter: "카테고리 필터",
     registrationDeadline: "신청 기한",
-    deadlinePassed: "신청 기한 마감",
+    deadlinePassed: "신청 마감",
     daysLeft: "일 남음",
     knockoutFormats: "녹아웃 라운드별 포맷",
     quarterFinalsFormat: "8강 포맷",
