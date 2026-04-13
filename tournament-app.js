@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.4";
+const APP_VERSION = "3.5";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1383,6 +1383,48 @@ export default function App() {
   };
   const updatePlayer = (id, updates) => {
     updateAndSavePlayers((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
+
+    // 이름 변경 시 토너먼트 등록정보 + 아메리카노 데이터도 동기화
+    if (updates.name) {
+      const oldPlayer = playersRef.current.find((p) => p.id === id);
+      if (oldPlayer) {
+        const oldName = oldPlayer.name;
+        const newName = updates.name;
+        // 토너먼트 등록정보 업데이트
+        updateAndSaveTournaments((prev) => prev.map((t) => {
+          let changed = false;
+          let regs = t.registrations;
+          if (regs?.length) {
+            regs = regs.map((r) => {
+              let u = {};
+              if (r.playerName === oldName) { u.playerName = newName; changed = true; }
+              if (r.partnerName === oldName) { u.partnerName = newName; changed = true; }
+              return Object.keys(u).length ? { ...r, ...u } : r;
+            });
+          }
+          let americanoData = t.americanoData;
+          if (americanoData) {
+            // 플랫 방식
+            if (americanoData.players) {
+              const ap = americanoData.players.map((p) => p.name === oldName ? { ...p, name: newName } : p);
+              if (ap.some((p, i) => p !== americanoData.players[i])) { americanoData = { ...americanoData, players: ap }; changed = true; }
+            }
+            // 그룹 방식
+            if (americanoData.groups) {
+              const gs = americanoData.groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
+              americanoData = { ...americanoData, groups: gs }; changed = true;
+            }
+            if (americanoData.finalGroups) {
+              const fg = americanoData.finalGroups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
+              americanoData = { ...americanoData, finalGroups: fg }; changed = true;
+            }
+          }
+          return changed ? { ...t, registrations: regs, americanoData } : t;
+        }));
+        // 랭킹 업데이트
+        updateAndSaveRankings((prev) => prev.map((r) => r.playerName === oldName ? { ...r, playerName: newName } : r));
+      }
+    }
   };
   const deletePlayer = (id) => {
     updateAndSavePlayers((prev) => prev.filter((p) => p.id !== id));
@@ -2904,7 +2946,7 @@ function RegistrationForm({ tournament, onSubmit, onCancel, T, isAdmin, players,
                 background: colors.white, border: `1px solid ${colors.gray200}`, borderRadius: 8,
                 boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 200, overflowY: "auto",
               }}>
-                {results.slice(0, 10).map((p) => (
+                {results.map((p) => (
                   <div key={p.id} onClick={() => { onSelect(p); setQuery(""); setShowList(false); }}
                     style={{
                       display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
