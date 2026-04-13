@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.7";
+const APP_VERSION = "3.8";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1602,15 +1602,15 @@ export default function App() {
               <span style={{ fontSize: 17, fontWeight: 700, whiteSpace: "nowrap" }}>{lang === "ko" ? "빠소" : "PSoc"}</span>
               <span style={{ fontSize: 9, opacity: 0.5, marginLeft: 4 }}>v{APP_VERSION}</span>
             </div>
-            <nav style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "nowrap" }}>
+            <nav style={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "nowrap", overflow: "hidden", minWidth: 0 }}>
               <NavBtn active={page === "home"} onClick={() => { setPage("home"); setSelectedTournament(null); }}>{T("home")}</NavBtn>
               <NavBtn active={page === "ranking"} onClick={() => { setPage("ranking"); setSelectedTournament(null); }}>{T("ranking")}</NavBtn>
               <NavBtn active={page === "players"} onClick={() => { if (!isAdminAuthenticated) { setPendingAdminPage("players"); setShowAdminPasswordModal(true); } else { setPage("players"); setSelectedTournament(null); } }}>{T("players")}</NavBtn>
               <NavBtn active={page === "admin"} onClick={() => { if (!isAdminAuthenticated) { setPendingAdminPage("admin"); setShowAdminPasswordModal(true); } else { setPage("admin"); setSelectedTournament(null); } }}>{T("admin")}</NavBtn>
-              <div style={{ position: "relative" }}>
+              <div style={{ position: "relative", flexShrink: 0 }}>
                 <button
                   onClick={(e) => { e.stopPropagation(); setShowLangMenu((v) => !v); }}
-                  style={{ display: "flex", alignItems: "center", gap: 3, padding: "5px 8px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: colors.white, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+                  style={{ display: "flex", alignItems: "center", gap: 3, padding: "5px 6px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: colors.white, cursor: "pointer", fontSize: 11, fontWeight: 600 }}
                 >
                   <Icon name="globe" size={14} />
                   {lang === "ko" ? "KR" : "EN"}
@@ -1757,15 +1757,16 @@ function NavBtn({ active, onClick, children }) {
     <button
       onClick={onClick}
       style={{
-        padding: "5px 10px",
+        padding: "5px 8px",
         borderRadius: 8,
         border: "none",
         background: active ? "rgba(255,255,255,0.2)" : "transparent",
         color: colors.white,
         cursor: "pointer",
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: active ? 700 : 500,
         whiteSpace: "nowrap",
+        flexShrink: 0,
         transition: "all 0.15s",
       }}
     >
