@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.8";
+const APP_VERSION = "3.9";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1684,6 +1684,7 @@ export default function App() {
               onUpdateTournament={updateTournament}
               players={players}
               onAddPlayer={addPlayer}
+              onUpdateRankings={(oldName, newName) => updateAndSaveRankings((prev) => prev.map((r) => r.playerName === oldName ? { ...r, playerName: newName } : r))}
               T={T}
               lang={lang}
             />
@@ -2456,7 +2457,7 @@ function applySnakeSeeding(teams, numGroups) {
 // ============================================================
 // TOURNAMENT DETAIL
 // ============================================================
-function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRejectRegistration, onSubmitRegistration, onUpdateTournament, players, onAddPlayer, T, lang }) {
+function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRejectRegistration, onSubmitRegistration, onUpdateTournament, players, onAddPlayer, onUpdateRankings, T, lang }) {
   const [tab, setTab] = useState("info");
   const [showRegForm, setShowRegForm] = useState(false);
   const [editingSettings, setEditingSettings] = useState(false);
@@ -2770,6 +2771,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
           onUpdateTournament={onUpdateTournament}
           players={players || []}
           onAddPlayer={onAddPlayer}
+          onUpdateRankings={onUpdateRankings}
           T={T}
           lang={lang}
         />
@@ -3125,10 +3127,11 @@ function RegistrationForm({ tournament, onSubmit, onCancel, T, isAdmin, players,
 // ============================================================
 // PARTICIPANTS TAB
 // ============================================================
-function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegistration, onUpdateTournament, players, onAddPlayer, T, lang }) {
+function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegistration, onUpdateTournament, players, onAddPlayer, onUpdateRankings, T, lang }) {
   const regs = tournament.registrations || [];
   const confirmed = regs.filter((r) => r.status === "confirmed");
   const pending = regs.filter((r) => r.status === "pending");
+  const [editingReg, setEditingReg] = useState(null); // { regId, field, value }
 
   // Check if a name is already in the player registry
   const isRegisteredPlayer = (name) => (players || []).some((p) => p.name === name);
@@ -3176,6 +3179,51 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
   const setSeed = (regId, seedVal) => {
     const newRegs = regs.map((r) => r.id === regId ? { ...r, seed: seedVal } : r);
     onUpdateTournament(tournament.id, { registrations: newRegs });
+  };
+
+  // 참가자 이름 수정 (등록정보 + 아메리카노 + 랭킹 동기화)
+  const saveRegName = (regId, field, newName) => {
+    const reg = regs.find((r) => r.id === regId);
+    if (!reg || !newName.trim()) { setEditingReg(null); return; }
+    const oldName = reg[field];
+    if (oldName === newName.trim()) { setEditingReg(null); return; }
+    const trimmed = newName.trim();
+
+    // 등록정보 업데이트
+    const newRegs = regs.map((r) => r.id === regId ? { ...r, [field]: trimmed } : r);
+
+    // 아메리카노 데이터 동기화
+    let americanoData = tournament.americanoData;
+    if (americanoData) {
+      if (americanoData.players) {
+        americanoData = { ...americanoData, players: americanoData.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) };
+      }
+      if (americanoData.groups) {
+        americanoData = { ...americanoData, groups: americanoData.groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) })) };
+      }
+      if (americanoData.finalGroups) {
+        americanoData = { ...americanoData, finalGroups: americanoData.finalGroups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) })) };
+      }
+    }
+
+    // RR 그룹/녹아웃 대진표 동기화
+    let updatedGroups = tournament.groups;
+    if (updatedGroups?.length) {
+      updatedGroups = updatedGroups.map((g) => ({ ...g, teams: g.teams?.map((tm) => tm.name === oldName ? { ...tm, name: trimmed } : tm) }));
+    }
+    let updatedKnockout = tournament.knockoutBracket;
+    if (updatedKnockout?.teams) {
+      updatedKnockout = { ...updatedKnockout, teams: updatedKnockout.teams.map((tm) => tm.name === oldName ? { ...tm, name: trimmed } : tm) };
+    }
+
+    onUpdateTournament(tournament.id, { registrations: newRegs, americanoData, groups: updatedGroups || tournament.groups, knockoutBracket: updatedKnockout || tournament.knockoutBracket });
+
+    // 랭킹 동기화
+    if (onUpdateRankings) {
+      onUpdateRankings(oldName, trimmed);
+    }
+
+    setEditingReg(null);
   };
 
   return (
@@ -3234,7 +3282,17 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
                   <div style={{ fontWeight: 600, color: colors.gray800 }}>{r.teamName || r.playerName}</div>
                   {isAdmin && (
                     <div style={{ fontSize: 12, color: colors.gray500, marginTop: 2, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
-                      <span>{r.playerName}</span>
+                      {editingReg?.regId === r.id && editingReg?.field === "playerName" ? (
+                        <input
+                          autoFocus
+                          defaultValue={r.playerName}
+                          onBlur={(e) => saveRegName(r.id, "playerName", e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveRegName(r.id, "playerName", e.target.value); if (e.key === "Escape") setEditingReg(null); }}
+                          style={{ fontSize: 12, padding: "2px 6px", borderRadius: 4, border: `1px solid ${colors.primary}`, width: 80 }}
+                        />
+                      ) : (
+                        <span onClick={() => setEditingReg({ regId: r.id, field: "playerName" })} style={{ cursor: "pointer", borderBottom: `1px dashed ${colors.gray300}` }}>{r.playerName}</span>
+                      )}
                       {r.playerPhone && <span>{r.playerPhone}</span>}
                       {onAddPlayer && !isRegisteredPlayer(r.playerName) && (
                         <button onClick={(e) => { e.stopPropagation(); registerOnePlayer(r.playerName, r.playerGender, r.playerPhone); }}
@@ -3248,7 +3306,17 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
                       {r.partnerName && (
                         <>
                           <span style={{ color: colors.gray300 }}>·</span>
-                          <span>{r.partnerName}</span>
+                          {editingReg?.regId === r.id && editingReg?.field === "partnerName" ? (
+                            <input
+                              autoFocus
+                              defaultValue={r.partnerName}
+                              onBlur={(e) => saveRegName(r.id, "partnerName", e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") saveRegName(r.id, "partnerName", e.target.value); if (e.key === "Escape") setEditingReg(null); }}
+                              style={{ fontSize: 12, padding: "2px 6px", borderRadius: 4, border: `1px solid ${colors.primary}`, width: 80 }}
+                            />
+                          ) : (
+                            <span onClick={() => setEditingReg({ regId: r.id, field: "partnerName" })} style={{ cursor: "pointer", borderBottom: `1px dashed ${colors.gray300}` }}>{r.partnerName}</span>
+                          )}
                           {r.partnerPhone && <span>{r.partnerPhone}</span>}
                           {onAddPlayer && !isRegisteredPlayer(r.partnerName) && (
                             <button onClick={(e) => { e.stopPropagation(); registerOnePlayer(r.partnerName, r.partnerGender, r.partnerPhone); }}
