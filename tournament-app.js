@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "4.3";
+const APP_VERSION = "4.4";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1933,7 +1933,7 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
           </span>
         </div>
       )}
-      {t.date && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("date")}: {formatDate(t.date, lang)}</p>}
+      {t.date && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("date")}: {formatDate(t.date, lang)}{t.startTime ? ` ${t.startTime}` : ""}</p>}
       {t.registrationDeadline && (
         <p style={{ fontSize: 13, margin: "4px 0", color: deadlineEndOfDay(t.registrationDeadline) < new Date() ? colors.danger : colors.warning }}>
           {T("registrationDeadline")}: {formatDate(t.registrationDeadline, lang)}
@@ -2025,10 +2025,11 @@ function AdminPanel({ tournaments, onSelect, onCreate, onEdit, onDelete, onRecal
                   <Badge type="info">{T(t.type)}</Badge>
                   <h3 style={{ fontSize: 16, fontWeight: 600, color: colors.gray800, margin: 0 }}>{t.name}</h3>
                 </div>
-                <p style={{ fontSize: 13, color: colors.gray500, marginTop: 4 }}>
+                <p style={{ fontSize: 13, color: colors.gray500, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {T("participants")}: {t.registrations?.filter((r) => r.status === "confirmed").length || 0}
                   {(t.categoryGender || t.categoryLevel) && ` · ${categoryLabel(lang, t.categoryGender, t.categoryLevel)}`}
                   {t.date && ` · ${formatDate(t.date, lang)}`}
+                  {t.startTime && ` ${t.startTime}`}
                 </p>
               </div>
               <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
@@ -2177,10 +2178,15 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
           </div>
         </FormField>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <FormField label={T("date")}>
             <DatePickerWithDay value={form.date} onChange={(v) => set("date", v)} lang={lang} />
           </FormField>
+          <FormField label={lang === "ko" ? "시작 시간" : "Start Time"}>
+            <input type="time" value={form.startTime || ""} onChange={(e) => set("startTime", e.target.value)} style={inputStyle} />
+          </FormField>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <FormField label={T("registrationDeadline")}>
             <DatePickerWithDay value={form.registrationDeadline || ""} onChange={(v) => set("registrationDeadline", v)} lang={lang} />
           </FormField>
@@ -2689,7 +2695,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
             {tournament.description && <p style={{ color: colors.gray700, lineHeight: 1.6, marginBottom: 16 }}>{tournament.description}</p>}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 12px", fontSize: 14, alignItems: "baseline" }}>
               <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("date")}</span>
-              <span style={{ color: colors.gray800 }}>{formatDate(tournament.date, lang)}</span>
+              <span style={{ color: colors.gray800 }}>{formatDate(tournament.date, lang)}{tournament.startTime ? ` ${tournament.startTime}` : ""}</span>
               {tournament.registrationDeadline && (
                 <>
                   <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("registrationDeadline")}</span>
