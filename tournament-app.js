@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "4.4";
+const APP_VERSION = "4.5";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2019,23 +2019,23 @@ function AdminPanel({ tournaments, onSelect, onCreate, onEdit, onDelete, onRecal
             // 날짜 최신순
             return (b.date || "").localeCompare(a.date || "");
           }).map((t) => (
-            <Card key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ cursor: "pointer", flex: 1 }} onClick={() => onSelect(t)}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Card key={t.id} onClick={() => onSelect(t)} style={{ cursor: "pointer" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <Badge type="info">{T(t.type)}</Badge>
                   <h3 style={{ fontSize: 16, fontWeight: 600, color: colors.gray800, margin: 0 }}>{t.name}</h3>
                 </div>
-                <p style={{ fontSize: 13, color: colors.gray500, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {T("participants")}: {t.registrations?.filter((r) => r.status === "confirmed").length || 0}
-                  {(t.categoryGender || t.categoryLevel) && ` · ${categoryLabel(lang, t.categoryGender, t.categoryLevel)}`}
-                  {t.date && ` · ${formatDate(t.date, lang)}`}
-                  {t.startTime && ` ${t.startTime}`}
-                </p>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                  <Btn variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(t); }}>{T("edit")}</Btn>
+                  <Btn variant="danger" size="sm" onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(t.id); }}>{T("delete")}</Btn>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                <Btn variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); onEdit(t); }}>{T("edit")}</Btn>
-                <Btn variant="danger" size="sm" onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(t.id); }}>{T("delete")}</Btn>
-              </div>
+              <p style={{ fontSize: 12, color: colors.gray500, marginTop: 6, margin: 0, marginTop: 6 }}>
+                {T("participants")}: {t.registrations?.filter((r) => r.status === "confirmed").length || 0}
+                {(t.categoryGender || t.categoryLevel) && ` · ${categoryLabel(lang, t.categoryGender, t.categoryLevel)}`}
+                {t.date && ` · ${formatDate(t.date, lang)}`}
+                {t.startTime && ` ${t.startTime}`}
+              </p>
             </Card>
           ))}
         </div>
