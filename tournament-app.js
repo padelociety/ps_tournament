@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "4.1";
+const APP_VERSION = "4.2";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1615,13 +1615,12 @@ export default function App() {
               <span style={{ fontSize: 17, fontWeight: 700, whiteSpace: "nowrap" }}>{lang === "ko" ? "빠소" : "PSoc"}</span>
               <span style={{ fontSize: 9, opacity: 0.5, marginLeft: 4 }}>v{APP_VERSION}</span>
             </div>
-            <nav style={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "nowrap", overflow: "hidden", minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
               <NavBtn active={page === "home"} onClick={() => { setPage("home"); setSelectedTournament(null); }}>{T("home")}</NavBtn>
               <NavBtn active={page === "ranking"} onClick={() => { setPage("ranking"); setSelectedTournament(null); }}>{T("ranking")}</NavBtn>
               <NavBtn active={page === "players"} onClick={() => { if (!isAdminAuthenticated) { setPendingAdminPage("players"); setShowAdminPasswordModal(true); } else { setPage("players"); setSelectedTournament(null); } }}>{T("players")}</NavBtn>
               <NavBtn active={page === "admin"} onClick={() => { if (!isAdminAuthenticated) { setPendingAdminPage("admin"); setShowAdminPasswordModal(true); } else { setPage("admin"); setSelectedTournament(null); } }}>{T("admin")}</NavBtn>
-            </nav>
-              <div style={{ position: "relative", flexShrink: 0 }}>
+              <div style={{ position: "relative", flexShrink: 0, marginLeft: 2 }}>
                 <button
                   onClick={(e) => { e.stopPropagation(); setShowLangMenu((v) => !v); }}
                   style={{ display: "flex", alignItems: "center", gap: 3, padding: "5px 6px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: colors.white, cursor: "pointer", fontSize: 11, fontWeight: 600 }}
@@ -1651,6 +1650,7 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </div>
           </div>
         </header>
 
@@ -1771,13 +1771,13 @@ function NavBtn({ active, onClick, children }) {
     <button
       onClick={onClick}
       style={{
-        padding: "5px 8px",
+        padding: "5px 7px",
         borderRadius: 8,
         border: "none",
         background: active ? "rgba(255,255,255,0.2)" : "transparent",
         color: colors.white,
         cursor: "pointer",
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: active ? 700 : 500,
         whiteSpace: "nowrap",
         flexShrink: 0,
