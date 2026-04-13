@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.6";
+const APP_VERSION = "3.7";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1382,48 +1382,66 @@ export default function App() {
     updateAndSavePlayers((prev) => [...prev, { ...player, id: generateId(), createdAt: new Date().toISOString() }]);
   };
   const updatePlayer = (id, updates) => {
+    // 이름 변경 시: 먼저 oldName을 저장 (updateAndSavePlayers가 ref를 바꾸기 전에)
+    const oldPlayer = playersRef.current.find((p) => p.id === id);
+    const oldName = oldPlayer?.name;
+    const newName = updates.name;
+
     updateAndSavePlayers((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
 
-    // 이름 변경 시 토너먼트 등록정보 + 아메리카노 데이터도 동기화
-    if (updates.name) {
-      const oldPlayer = playersRef.current.find((p) => p.id === id);
-      if (oldPlayer) {
-        const oldName = oldPlayer.name;
-        const newName = updates.name;
-        // 토너먼트 등록정보 업데이트
-        updateAndSaveTournaments((prev) => prev.map((t) => {
-          let changed = false;
-          let regs = t.registrations;
-          if (regs?.length) {
-            regs = regs.map((r) => {
-              let u = {};
-              if (r.playerName === oldName) { u.playerName = newName; changed = true; }
-              if (r.partnerName === oldName) { u.partnerName = newName; changed = true; }
-              return Object.keys(u).length ? { ...r, ...u } : r;
-            });
+    // 이름이 실제로 변경된 경우에만 동기화
+    if (newName && oldName && newName !== oldName) {
+      // 토너먼트 등록정보 + 아메리카노 데이터 + 대진표 업데이트
+      updateAndSaveTournaments((prev) => prev.map((t) => {
+        let changed = false;
+        let regs = t.registrations;
+        if (regs?.length) {
+          regs = regs.map((r) => {
+            let u = {};
+            if (r.playerName === oldName) { u.playerName = newName; changed = true; }
+            if (r.partnerName === oldName) { u.partnerName = newName; changed = true; }
+            return Object.keys(u).length ? { ...r, ...u } : r;
+          });
+        }
+        // RR/오픈 대진표 팀이름 업데이트
+        let updatedGroups = t.groups;
+        if (updatedGroups?.length) {
+          updatedGroups = updatedGroups.map((g) => {
+            const newTeams = g.teams?.map((tm) => tm.name === oldName ? { ...tm, name: newName } : tm);
+            if (newTeams?.some((tm, i) => tm !== g.teams[i])) { changed = true; return { ...g, teams: newTeams }; }
+            return g;
+          });
+        }
+        // 녹아웃 대진표 팀이름 업데이트
+        let updatedKnockout = t.knockoutBracket;
+        if (updatedKnockout?.teams) {
+          const newTeams = updatedKnockout.teams.map((tm) => tm.name === oldName ? { ...tm, name: newName } : tm);
+          if (newTeams.some((tm, i) => tm !== updatedKnockout.teams[i])) {
+            updatedKnockout = { ...updatedKnockout, teams: newTeams };
+            changed = true;
           }
-          let americanoData = t.americanoData;
-          if (americanoData) {
-            // 플랫 방식
-            if (americanoData.players) {
-              const ap = americanoData.players.map((p) => p.name === oldName ? { ...p, name: newName } : p);
-              if (ap.some((p, i) => p !== americanoData.players[i])) { americanoData = { ...americanoData, players: ap }; changed = true; }
-            }
-            // 그룹 방식
-            if (americanoData.groups) {
-              const gs = americanoData.groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
-              americanoData = { ...americanoData, groups: gs }; changed = true;
-            }
-            if (americanoData.finalGroups) {
-              const fg = americanoData.finalGroups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
-              americanoData = { ...americanoData, finalGroups: fg }; changed = true;
-            }
+        }
+        let americanoData = t.americanoData;
+        if (americanoData) {
+          // 플랫 방식
+          if (americanoData.players) {
+            const ap = americanoData.players.map((p) => p.name === oldName ? { ...p, name: newName } : p);
+            if (ap.some((p, i) => p !== americanoData.players[i])) { americanoData = { ...americanoData, players: ap }; changed = true; }
           }
-          return changed ? { ...t, registrations: regs, americanoData } : t;
-        }));
-        // 랭킹 업데이트
-        updateAndSaveRankings((prev) => prev.map((r) => r.playerName === oldName ? { ...r, playerName: newName } : r));
-      }
+          // 그룹 방식
+          if (americanoData.groups) {
+            const gs = americanoData.groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
+            americanoData = { ...americanoData, groups: gs }; changed = true;
+          }
+          if (americanoData.finalGroups) {
+            const fg = americanoData.finalGroups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
+            americanoData = { ...americanoData, finalGroups: fg }; changed = true;
+          }
+        }
+        return changed ? { ...t, registrations: regs, groups: updatedGroups || t.groups, knockoutBracket: updatedKnockout || t.knockoutBracket, americanoData } : t;
+      }));
+      // 랭킹 업데이트
+      updateAndSaveRankings((prev) => prev.map((r) => r.playerName === oldName ? { ...r, playerName: newName } : r));
     }
   };
   const deletePlayer = (id) => {
