@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "4.0";
+const APP_VERSION = "4.1";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1032,21 +1032,34 @@ function calcAmericanoStandings(players, rounds) {
 }
 
 // 아메리카노 그룹 스테이지 생성 (8명 이상: 4명씩 그룹)
-function generateAmericanoGroupStage(players, isMexicano) {
+function generateAmericanoGroupStage(players, isMexicano, useSeeds = false) {
   const n = players.length;
-  const shuffled = [...players].sort(() => Math.random() - 0.5);
   const numGroups = Math.floor(n / 4);
   const groupNames = "ABCDEFGHIJ".split("");
-  const baseSize = Math.floor(n / numGroups);
-  let extra = n % numGroups;
-  const groups = [];
-  let idx = 0;
 
+  // 시드가 있으면 스네이크 시딩, 없으면 랜덤 셔플
+  let ordered;
+  if (useSeeds) {
+    // 시드 있는 선수 먼저 (오름차순), 나머지 랜덤
+    const seeded = players.filter((p) => p.seed).sort((a, b) => a.seed - b.seed);
+    const unseeded = players.filter((p) => !p.seed).sort(() => Math.random() - 0.5);
+    ordered = [...seeded, ...unseeded];
+  } else {
+    ordered = [...players].sort(() => Math.random() - 0.5);
+  }
+
+  // 스네이크 시딩으로 그룹 배분: 1→A, 2→B, 3→C, 4→C, 5→B, 6→A, ...
+  const groupBuckets = Array.from({ length: numGroups }, () => []);
+  ordered.forEach((p, i) => {
+    const row = Math.floor(i / numGroups);
+    const col = i % numGroups;
+    const gi = row % 2 === 0 ? col : (numGroups - 1 - col);
+    groupBuckets[gi].push(p);
+  });
+
+  const groups = [];
   for (let g = 0; g < numGroups; g++) {
-    const size = baseSize + (extra > 0 ? 1 : 0);
-    if (extra > 0) extra--;
-    const gPlayers = shuffled.slice(idx, idx + size);
-    idx += size;
+    const gPlayers = groupBuckets[g];
 
     const byeTracker = {};
     gPlayers.forEach(p => { byeTracker[p.id] = 0; });
@@ -3580,14 +3593,21 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     updateData({ americanoData: newData });
   };
 
-  // 대진표 생성 (시작 후 별도 버튼) 또는 재설정
+  // 대진표 초기화 (americanoData를 null로 → 생성 전 화면으로)
+  const clearAmericanoBracket = () => {
+    updateData({ americanoData: null });
+  };
+
+  // 대진표 생성 (시드 반영)
   const generateAmericanoBracket = () => {
     const confirmedForAmericano = tournament.registrations?.filter((r) => r.status === "confirmed") || [];
-    const players = confirmedForAmericano.map((r) => ({ id: r.id, name: r.playerName }));
+    let players = confirmedForAmericano.map((r) => ({ id: r.id, name: r.playerName, seed: r.seed || null }));
     if (players.length < 4) return;
     const isMexicano = tournament.americanoType === "mexicano";
     if (players.length >= 8) {
-      updateData({ americanoData: generateAmericanoGroupStage(players, isMexicano) });
+      // 시드가 있으면 스네이크 시딩으로 그룹 배분
+      const hasSeeds = players.some((p) => p.seed);
+      updateData({ americanoData: generateAmericanoGroupStage(players, isMexicano, hasSeeds) });
     } else {
       const data = generateAmericanoRounds(players, 1, tournament.americanoType === "team", isMexicano);
       updateData({ americanoData: { ...data, players } });
@@ -3675,23 +3695,64 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
 
   // AMERICANO VIEW: 대진표 미생성 상태
   if (tournament.type === "americano" && !americanoData) {
-    const confirmedCount = (tournament.registrations?.filter((r) => r.status === "confirmed") || []).length;
+    const confirmedRegsForDraw = tournament.registrations?.filter((r) => r.status === "confirmed") || [];
+    const confirmedCount = confirmedRegsForDraw.length;
+    const hasSeeds = confirmedRegsForDraw.some((r) => r.seed);
+
+    const setAmericanoSeed = (regId, seedVal) => {
+      const newRegs = (tournament.registrations || []).map((r) => r.id === regId ? { ...r, seed: seedVal ? parseInt(seedVal) : null } : r);
+      updateData({ registrations: newRegs });
+    };
+
     return (
-      <div style={{ textAlign: "center", padding: "40px 20px" }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>{"🎾"}</div>
-        <h3 style={{ fontSize: 18, fontWeight: 700, color: colors.gray800, marginBottom: 8 }}>
-          {lang === "ko" ? "대진표를 생성해주세요" : "Generate the bracket"}
-        </h3>
-        <p style={{ fontSize: 14, color: colors.gray500, marginBottom: 20 }}>
-          {lang === "ko" ? `확정 참가자: ${confirmedCount}명` : `Confirmed: ${confirmedCount} players`}
-        </p>
+      <div style={{ padding: "20px 0" }}>
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <h3 style={{ fontSize: 18, fontWeight: 700, color: colors.gray800, marginBottom: 8 }}>
+            {lang === "ko" ? "대진표를 생성해주세요" : "Generate the bracket"}
+          </h3>
+          <p style={{ fontSize: 14, color: colors.gray500 }}>
+            {lang === "ko" ? `확정 참가자: ${confirmedCount}명` : `Confirmed: ${confirmedCount} players`}
+            {confirmedCount >= 8 && (lang === "ko" ? ` → ${Math.floor(confirmedCount / 4)}개 조` : ` → ${Math.floor(confirmedCount / 4)} groups`)}
+          </p>
+        </div>
+
+        {/* 시드 배정 */}
+        {isAdmin && confirmedCount >= 4 && (
+          <Card style={{ marginBottom: 16 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 600, color: colors.gray600, marginBottom: 10 }}>
+              {lang === "ko" ? "시드 배정 (선택사항)" : "Seed Assignment (optional)"}
+            </h4>
+            <p style={{ fontSize: 12, color: colors.gray400, marginBottom: 12 }}>
+              {lang === "ko" ? "시드를 배정하면 스네이크 시딩으로 조가 균등하게 배분됩니다." : "Seeds distribute players evenly across groups via snake seeding."}
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {confirmedRegsForDraw.map((r, i) => (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", background: i % 2 === 0 ? colors.gray50 : "transparent", borderRadius: 6 }}>
+                  <select
+                    value={r.seed || ""}
+                    onChange={(e) => setAmericanoSeed(r.id, e.target.value)}
+                    style={{ width: 52, padding: "4px", borderRadius: 6, border: `1px solid ${colors.gray300}`, fontSize: 12, textAlign: "center" }}
+                  >
+                    <option value="">-</option>
+                    {Array.from({ length: confirmedCount }, (_, k) => k + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: colors.gray800 }}>{r.playerName}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
         {isAdmin && tournament.stage === "ongoing" && (
-          <Btn onClick={generateAmericanoBracket} disabled={confirmedCount < 4}>
-            {lang === "ko" ? "대진표 생성" : "Generate Bracket"}
-          </Btn>
+          <div style={{ textAlign: "center" }}>
+            <Btn onClick={generateAmericanoBracket} disabled={confirmedCount < 4}>
+              {lang === "ko" ? "대진표 생성" : "Generate Bracket"}
+              {hasSeeds && (lang === "ko" ? " (시드 적용)" : " (seeded)")}
+            </Btn>
+          </div>
         )}
         {confirmedCount < 4 && (
-          <p style={{ fontSize: 12, color: colors.warning, marginTop: 8 }}>
+          <p style={{ fontSize: 12, color: colors.warning, textAlign: "center", marginTop: 8 }}>
             {lang === "ko" ? "최소 4명 이상 필요합니다" : "Minimum 4 players required"}
           </p>
         )}
@@ -3715,9 +3776,14 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               {phase === "final" ? (lang === "ko" ? "결승 라운드" : "Final Round") : (lang === "ko" ? "조별 리그" : "Group Stage")}
             </Badge>
             {isAdmin && tournament.stage === "ongoing" && (
-              <Btn size="sm" variant="outline" onClick={generateAmericanoBracket}>
-                {lang === "ko" ? "대진표 재설정" : "Reset Bracket"}
-              </Btn>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn size="sm" variant="outline" onClick={generateAmericanoBracket}>
+                  {lang === "ko" ? "대진표 재설정" : "Reset Bracket"}
+                </Btn>
+                <Btn size="sm" variant="danger" onClick={clearAmericanoBracket}>
+                  {lang === "ko" ? "대진표 초기화" : "Clear Bracket"}
+                </Btn>
+              </div>
             )}
           </div>
 
@@ -3762,9 +3828,12 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     return (
       <div>
         {isAdmin && tournament.stage === "ongoing" && (
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 12 }}>
             <Btn size="sm" variant="outline" onClick={generateAmericanoBracket}>
               {lang === "ko" ? "대진표 재설정" : "Reset Bracket"}
+            </Btn>
+            <Btn size="sm" variant="danger" onClick={clearAmericanoBracket}>
+              {lang === "ko" ? "대진표 초기화" : "Clear Bracket"}
             </Btn>
           </div>
         )}
