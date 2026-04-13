@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.9";
+const APP_VERSION = "4.0";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1602,11 +1602,12 @@ export default function App() {
               <span style={{ fontSize: 17, fontWeight: 700, whiteSpace: "nowrap" }}>{lang === "ko" ? "빠소" : "PSoc"}</span>
               <span style={{ fontSize: 9, opacity: 0.5, marginLeft: 4 }}>v{APP_VERSION}</span>
             </div>
-            <nav style={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "nowrap", overflow: "hidden", minWidth: 0 }}>
+            <nav style={{ display: "flex", alignItems: "center", gap: 2, flexWrap: "nowrap", overflow: "hidden", minWidth: 0, flex: 1 }}>
               <NavBtn active={page === "home"} onClick={() => { setPage("home"); setSelectedTournament(null); }}>{T("home")}</NavBtn>
               <NavBtn active={page === "ranking"} onClick={() => { setPage("ranking"); setSelectedTournament(null); }}>{T("ranking")}</NavBtn>
               <NavBtn active={page === "players"} onClick={() => { if (!isAdminAuthenticated) { setPendingAdminPage("players"); setShowAdminPasswordModal(true); } else { setPage("players"); setSelectedTournament(null); } }}>{T("players")}</NavBtn>
               <NavBtn active={page === "admin"} onClick={() => { if (!isAdminAuthenticated) { setPendingAdminPage("admin"); setShowAdminPasswordModal(true); } else { setPage("admin"); setSelectedTournament(null); } }}>{T("admin")}</NavBtn>
+            </nav>
               <div style={{ position: "relative", flexShrink: 0 }}>
                 <button
                   onClick={(e) => { e.stopPropagation(); setShowLangMenu((v) => !v); }}
@@ -1637,7 +1638,6 @@ export default function App() {
                   </div>
                 )}
               </div>
-            </nav>
           </div>
         </header>
 
