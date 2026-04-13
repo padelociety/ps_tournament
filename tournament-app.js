@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "4.5";
+const APP_VERSION = "4.6";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -3295,72 +3295,65 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {confirmed.map((r, i) => (
-              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: i % 2 === 0 ? colors.gray50 : colors.white, borderRadius: 8 }}>
-                <span style={{ width: 28, fontWeight: 700, color: colors.gray400, fontSize: 13, alignSelf: "flex-start", marginTop: 2 }}>{i + 1}</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, color: colors.gray800 }}>{r.teamName || r.playerName}</div>
-                  {isAdmin && (
-                    <div style={{ fontSize: 12, color: colors.gray500, marginTop: 2, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
-                      {editingReg?.regId === r.id && editingReg?.field === "playerName" ? (
-                        <input
-                          autoFocus
-                          defaultValue={r.playerName}
-                          onBlur={(e) => saveRegName(r.id, "playerName", e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") saveRegName(r.id, "playerName", e.target.value); if (e.key === "Escape") setEditingReg(null); }}
-                          style={{ fontSize: 12, padding: "2px 6px", borderRadius: 4, border: `1px solid ${colors.primary}`, width: 80 }}
-                        />
-                      ) : (
-                        <span onClick={() => setEditingReg({ regId: r.id, field: "playerName" })} style={{ cursor: "pointer", borderBottom: `1px dashed ${colors.gray300}` }}>{r.playerName}</span>
-                      )}
-                      {r.playerPhone && <span>{r.playerPhone}</span>}
-                      {onAddPlayer && !isRegisteredPlayer(r.playerName) && (
-                        <button onClick={(e) => { e.stopPropagation(); registerOnePlayer(r.playerName, r.playerGender, r.playerPhone); }}
-                          style={{ padding: "1px 6px", borderRadius: 6, border: `1px solid ${colors.primary}`, background: colors.primaryLight, color: colors.primary, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
-                          +{lang === "ko" ? "선수" : "Reg"}
-                        </button>
-                      )}
-                      {onAddPlayer && isRegisteredPlayer(r.playerName) && (
-                        <span style={{ fontSize: 10, color: colors.success, fontWeight: 600 }}>{"✓"}</span>
-                      )}
-                      {r.partnerName && (
-                        <>
-                          <span style={{ color: colors.gray300 }}>·</span>
-                          {editingReg?.regId === r.id && editingReg?.field === "partnerName" ? (
-                            <input
-                              autoFocus
-                              defaultValue={r.partnerName}
-                              onBlur={(e) => saveRegName(r.id, "partnerName", e.target.value)}
-                              onKeyDown={(e) => { if (e.key === "Enter") saveRegName(r.id, "partnerName", e.target.value); if (e.key === "Escape") setEditingReg(null); }}
-                              style={{ fontSize: 12, padding: "2px 6px", borderRadius: 4, border: `1px solid ${colors.primary}`, width: 80 }}
-                            />
-                          ) : (
-                            <span onClick={() => setEditingReg({ regId: r.id, field: "partnerName" })} style={{ cursor: "pointer", borderBottom: `1px dashed ${colors.gray300}` }}>{r.partnerName}</span>
-                          )}
-                          {r.partnerPhone && <span>{r.partnerPhone}</span>}
-                          {onAddPlayer && !isRegisteredPlayer(r.partnerName) && (
-                            <button onClick={(e) => { e.stopPropagation(); registerOnePlayer(r.partnerName, r.partnerGender, r.partnerPhone); }}
-                              style={{ padding: "1px 6px", borderRadius: 6, border: `1px solid ${colors.primary}`, background: colors.primaryLight, color: colors.primary, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
-                              +{lang === "ko" ? "선수" : "Reg"}
-                            </button>
-                          )}
-                          {onAddPlayer && isRegisteredPlayer(r.partnerName) && (
-                            <span style={{ fontSize: 10, color: colors.success, fontWeight: 600 }}>{"✓"}</span>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
+              <div key={r.id} style={{ padding: "10px 12px", background: i % 2 === 0 ? colors.gray50 : colors.white, borderRadius: 8 }}>
+                {/* 1줄: 번호 + 이름 + 시드 */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 24, fontWeight: 700, color: colors.gray400, fontSize: 13, flexShrink: 0 }}>{i + 1}</span>
+                  <span style={{ fontWeight: 600, color: colors.gray800, fontSize: 15 }}>{r.teamName || r.playerName}</span>
+                  {r.seed && <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 700, background: colors.warningLight, color: colors.warning }}>S{r.seed}</span>}
                 </div>
-                {r.seed && <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 700, background: colors.warningLight, color: colors.warning }}>S{r.seed}</span>}
-                {isAdmin && tournament.stage === "registration" && (
-                  <select value={r.seed || ""} onChange={(e) => setSeed(r.id, e.target.value ? parseInt(e.target.value) : null)}
-                    style={{ width: 56, padding: "4px", borderRadius: 6, border: `1px solid ${colors.gray300}`, fontSize: 12, textAlign: "center", flexShrink: 0 }}>
-                    <option value="">{T("seed")}</option>
-                    {Array.from({ length: confirmed.length }, (_, k) => k + 1).map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                )}
+                {/* 2줄: 관리자 상세 (이름 편집 + 등록 상태) */}
                 {isAdmin && (
-                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                  <div style={{ fontSize: 12, color: colors.gray500, marginTop: 4, marginLeft: 32, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+                    {editingReg?.regId === r.id && editingReg?.field === "playerName" ? (
+                      <input autoFocus defaultValue={r.playerName}
+                        onBlur={(e) => saveRegName(r.id, "playerName", e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") saveRegName(r.id, "playerName", e.target.value); if (e.key === "Escape") setEditingReg(null); }}
+                        style={{ fontSize: 12, padding: "2px 6px", borderRadius: 4, border: `1px solid ${colors.primary}`, width: 80 }} />
+                    ) : (
+                      <span onClick={() => setEditingReg({ regId: r.id, field: "playerName" })} style={{ cursor: "pointer", borderBottom: `1px dashed ${colors.gray300}` }}>{r.playerName}</span>
+                    )}
+                    {r.playerPhone && <span>{r.playerPhone}</span>}
+                    {onAddPlayer && !isRegisteredPlayer(r.playerName) && (
+                      <button onClick={(e) => { e.stopPropagation(); registerOnePlayer(r.playerName, r.playerGender, r.playerPhone); }}
+                        style={{ padding: "1px 6px", borderRadius: 6, border: `1px solid ${colors.primary}`, background: colors.primaryLight, color: colors.primary, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+                        +{lang === "ko" ? "선수" : "Reg"}
+                      </button>
+                    )}
+                    {onAddPlayer && isRegisteredPlayer(r.playerName) && <span style={{ fontSize: 10, color: colors.success, fontWeight: 600 }}>{"✓"}</span>}
+                    {r.partnerName && (
+                      <>
+                        <span style={{ color: colors.gray300 }}>·</span>
+                        {editingReg?.regId === r.id && editingReg?.field === "partnerName" ? (
+                          <input autoFocus defaultValue={r.partnerName}
+                            onBlur={(e) => saveRegName(r.id, "partnerName", e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") saveRegName(r.id, "partnerName", e.target.value); if (e.key === "Escape") setEditingReg(null); }}
+                            style={{ fontSize: 12, padding: "2px 6px", borderRadius: 4, border: `1px solid ${colors.primary}`, width: 80 }} />
+                        ) : (
+                          <span onClick={() => setEditingReg({ regId: r.id, field: "partnerName" })} style={{ cursor: "pointer", borderBottom: `1px dashed ${colors.gray300}` }}>{r.partnerName}</span>
+                        )}
+                        {r.partnerPhone && <span>{r.partnerPhone}</span>}
+                        {onAddPlayer && !isRegisteredPlayer(r.partnerName) && (
+                          <button onClick={(e) => { e.stopPropagation(); registerOnePlayer(r.partnerName, r.partnerGender, r.partnerPhone); }}
+                            style={{ padding: "1px 6px", borderRadius: 6, border: `1px solid ${colors.primary}`, background: colors.primaryLight, color: colors.primary, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+                            +{lang === "ko" ? "선수" : "Reg"}
+                          </button>
+                        )}
+                        {onAddPlayer && isRegisteredPlayer(r.partnerName) && <span style={{ fontSize: 10, color: colors.success, fontWeight: 600 }}>{"✓"}</span>}
+                      </>
+                    )}
+                  </div>
+                )}
+                {/* 3줄: 관리자 버튼 (시드/위로/아래로/취소) */}
+                {isAdmin && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, marginLeft: 32 }}>
+                    {tournament.stage === "registration" && (
+                      <select value={r.seed || ""} onChange={(e) => setSeed(r.id, e.target.value ? parseInt(e.target.value) : null)}
+                        style={{ width: 56, padding: "4px", borderRadius: 6, border: `1px solid ${colors.gray300}`, fontSize: 12, textAlign: "center" }}>
+                        <option value="">{T("seed")}</option>
+                        {Array.from({ length: confirmed.length }, (_, k) => k + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    )}
                     <Btn size="sm" variant="outline" onClick={() => moveParticipant(i, "up")} disabled={i === 0}>{T("moveUp")}</Btn>
                     <Btn size="sm" variant="outline" onClick={() => moveParticipant(i, "down")} disabled={i === confirmed.length - 1}>{T("moveDown")}</Btn>
                     <Btn size="sm" variant="danger" onClick={() => removeParticipant(r.id)}>{T("removeParticipant")}</Btn>
