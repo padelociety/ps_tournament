@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "4.2";
+const APP_VERSION = "4.3";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -4349,13 +4349,21 @@ function PlayersPage({ players, onAddPlayer, onUpdatePlayer, onDeletePlayer, T, 
   const [showForm, setShowForm] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [filterGender, setFilterGender] = useState("all"); // "all" | "male" | "female"
+  const [filterLevel, setFilterLevel] = useState("all");
   const [form, setForm] = useState({ name: "", gender: "", phone: "", level: "", birthdate: "", firstName: "", lastName: "" });
 
-  const filtered = players.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase()) || (p.phone && p.phone.includes(search))
-    || (p.firstName && p.firstName.toLowerCase().includes(search.toLowerCase()))
-    || (p.lastName && p.lastName.toLowerCase().includes(search.toLowerCase()))
-  );
+  const allLevels = [...new Set(players.map((p) => p.level).filter(Boolean))].sort();
+
+  const filtered = players
+    .filter((p) =>
+      p.name.toLowerCase().includes(search.toLowerCase()) || (p.phone && p.phone.includes(search))
+      || (p.firstName && p.firstName.toLowerCase().includes(search.toLowerCase()))
+      || (p.lastName && p.lastName.toLowerCase().includes(search.toLowerCase()))
+    )
+    .filter((p) => filterGender === "all" || p.gender === filterGender)
+    .filter((p) => filterLevel === "all" || p.level === filterLevel)
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
 
   const openEdit = (p) => {
     setForm({ name: p.name, gender: p.gender, phone: p.phone || "", level: p.level || "", birthdate: p.birthdate || "", firstName: p.firstName || "", lastName: p.lastName || "" });
@@ -4387,19 +4395,47 @@ function PlayersPage({ players, onAddPlayer, onUpdatePlayer, onDeletePlayer, T, 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div>
           <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.gray800, margin: 0 }}>{T("playerRegistry")}</h2>
-          <p style={{ fontSize: 13, color: colors.gray500, marginTop: 4 }}>{players.length}{lang === "ko" ? "명 등록" : " registered"}</p>
+          <p style={{ fontSize: 13, color: colors.gray500, marginTop: 4 }}>{lang === "ko" ? `총 ${players.length}명 등록` : `${players.length} registered`}</p>
         </div>
         <Btn onClick={openAdd}>{T("addPlayer")}</Btn>
       </div>
 
-      {/* Search */}
-      <div style={{ marginBottom: 16 }}>
+      {/* Search + Filters */}
+      <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 10 }}>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={T("searchPlayer") + "..."}
           style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: `1px solid ${colors.gray300}`, fontSize: 14, boxSizing: "border-box" }}
         />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {/* Gender filter */}
+          {[
+            { value: "all", label: lang === "ko" ? "전체" : "All" },
+            { value: "male", label: lang === "ko" ? "남" : "M" },
+            { value: "female", label: lang === "ko" ? "여" : "F" },
+          ].map((opt) => (
+            <button key={opt.value} onClick={() => setFilterGender(opt.value)}
+              style={{
+                padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                border: filterGender === opt.value ? `2px solid ${colors.primary}` : `1px solid ${colors.gray300}`,
+                background: filterGender === opt.value ? colors.primaryLight : colors.white,
+                color: filterGender === opt.value ? colors.primary : colors.gray600,
+              }}
+            >{opt.label}</button>
+          ))}
+          <span style={{ width: 1, height: 16, background: colors.gray200 }} />
+          {/* Level filter */}
+          <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value)}
+            style={{ padding: "4px 8px", borderRadius: 8, border: `1px solid ${colors.gray300}`, fontSize: 12, color: filterLevel === "all" ? colors.gray500 : colors.primary, fontWeight: filterLevel === "all" ? 400 : 600 }}>
+            <option value="all">{lang === "ko" ? "레벨 전체" : "All Levels"}</option>
+            {allLevels.map((lv) => <option key={lv} value={lv}>{T(lv) || lv}</option>)}
+          </select>
+          {/* Count */}
+          <span style={{ marginLeft: "auto", fontSize: 12, color: colors.gray500, fontWeight: 600 }}>
+            {filtered.length}{lang === "ko" ? "명" : " players"}
+          </span>
+        </div>
       </div>
 
       {/* Player List */}
