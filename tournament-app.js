@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.4";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1029,6 +1029,103 @@ function calcAmericanoStandings(players, rounds) {
     })
   );
   return Object.values(stats).sort((a, b) => b.points - a.points);
+}
+
+// 아메리카노 그룹 스테이지 생성 (8명 이상: 4명씩 그룹)
+function generateAmericanoGroupStage(players, isMexicano) {
+  const n = players.length;
+  const shuffled = [...players].sort(() => Math.random() - 0.5);
+  const numGroups = Math.floor(n / 4);
+  const groupNames = "ABCDEFGHIJ".split("");
+  const baseSize = Math.floor(n / numGroups);
+  let extra = n % numGroups;
+  const groups = [];
+  let idx = 0;
+
+  for (let g = 0; g < numGroups; g++) {
+    const size = baseSize + (extra > 0 ? 1 : 0);
+    if (extra > 0) extra--;
+    const gPlayers = shuffled.slice(idx, idx + size);
+    idx += size;
+
+    const byeTracker = {};
+    gPlayers.forEach(p => { byeTracker[p.id] = 0; });
+    const byePerRound = gPlayers.length % 4;
+    const { active, byes } = selectPlayersForRound(gPlayers, byePerRound, byeTracker);
+    byes.forEach(p => { byeTracker[p.id]++; });
+
+    const s = [...active].sort(() => Math.random() - 0.5);
+    const firstRound = [];
+    for (let i = 0; i < s.length - 3; i += 4) {
+      firstRound.push({
+        id: generateId(),
+        team1: [s[i].id, s[i + 1].id],
+        team2: [s[i + 2].id, s[i + 3].id],
+        team1Score: null, team2Score: null, completed: false,
+      });
+    }
+
+    groups.push({
+      name: groupNames[g] || ("G" + (g + 1)),
+      players: gPlayers,
+      rounds: [firstRound],
+      byeTracker,
+    });
+  }
+
+  return { players, useGroups: true, phase: "group", groups, finalGroups: null };
+}
+
+// 그룹 내 다음 라운드 생성
+function generateGroupNextRound(group, isMexicano) {
+  if (isMexicano) {
+    return generateMexicanoNextRound(group.players, group.rounds, group.byeTracker);
+  } else {
+    return generateAmericanoNextRound(group.players, group.rounds);
+  }
+}
+
+// 그룹 스테이지 → 결승 라운드 (승자조/패자조) 전환
+function advanceAmericanoToFinal(americanoData, isMexicano, lang) {
+  const { groups } = americanoData;
+  const winners = [];
+  const losers = [];
+
+  groups.forEach(group => {
+    const standings = calcAmericanoStandings(group.players, group.rounds);
+    // 각 조에서 상위 2명 → 승자조, 나머지 → 패자조
+    standings.slice(0, 2).forEach(s => winners.push(s.player));
+    standings.slice(2).forEach(s => losers.push(s.player));
+  });
+
+  function createFinalGroup(name, players) {
+    const byePerRound = players.length % 4;
+    const byeTracker = {};
+    players.forEach(p => { byeTracker[p.id] = 0; });
+    const { active, byes } = selectPlayersForRound(players, byePerRound, byeTracker);
+    byes.forEach(p => { byeTracker[p.id]++; });
+
+    const s = [...active].sort(() => Math.random() - 0.5);
+    const firstRound = [];
+    for (let i = 0; i < s.length - 3; i += 4) {
+      firstRound.push({
+        id: generateId(),
+        team1: [s[i].id, s[i + 1].id],
+        team2: [s[i + 2].id, s[i + 3].id],
+        team1Score: null, team2Score: null, completed: false,
+      });
+    }
+    return { name, players, rounds: [firstRound], byeTracker };
+  }
+
+  return {
+    ...americanoData,
+    phase: "final",
+    finalGroups: [
+      createFinalGroup(lang === "ko" ? "승자조" : "Winners", winners),
+      createFinalGroup(lang === "ko" ? "패자조" : "Losers", losers),
+    ],
+  };
 }
 
 // ============================================================
@@ -2375,8 +2472,14 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
 
     if (tournament.type === "americano") {
       const players = confirmedRegs.map((r) => ({ id: r.id, name: r.playerName }));
-      // 첫 라운드만 생성 (이후는 관리자가 "다음 라운드" 버튼으로 추가)
-      updates.americanoData = { ...generateAmericanoRounds(players, 1, tournament.americanoType === "team", tournament.americanoType === "mexicano"), players };
+      const isMexicano = tournament.americanoType === "mexicano";
+      if (players.length >= 8) {
+        // 8명 이상: 4명씩 그룹 스테이지
+        updates.americanoData = generateAmericanoGroupStage(players, isMexicano);
+      } else {
+        // 7명 이하: 기존 플랫 방식
+        updates.americanoData = { ...generateAmericanoRounds(players, 1, tournament.americanoType === "team", isMexicano), players };
+      }
     } else if (needsGroupDraw(tournament.type, maxT)) {
       // Don't auto-generate groups — let admin use Draw button or manual assignment
     } else {
@@ -3302,52 +3405,213 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     setScoreModal(null);
   };
 
-  const saveAmericanoScore = (roundIdx, matchId, team1Score, team2Score) => {
+  // === AMERICANO SCORE / ROUND / RESET (그룹 + 플랫 모두 지원) ===
+  const saveAmericanoScore = (roundIdx, matchId, team1Score, team2Score, groupIdx) => {
     const data = { ...americanoData };
-    data.rounds = data.rounds.map((round, ri) =>
-      ri === roundIdx
-        ? round.map((m) => (m.id === matchId ? { ...m, team1Score: parseInt(team1Score), team2Score: parseInt(team2Score), completed: true } : m))
-        : round
-    );
+    if (data.useGroups && groupIdx != null) {
+      const phase = data.phase === "final" ? "finalGroups" : "groups";
+      const gArr = [...data[phase]];
+      const g = { ...gArr[groupIdx] };
+      g.rounds = g.rounds.map((round, ri) =>
+        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(team1Score), team2Score: parseInt(team2Score), completed: true } : m) : round
+      );
+      gArr[groupIdx] = g;
+      data[phase] = gArr;
+    } else {
+      data.rounds = data.rounds.map((round, ri) =>
+        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(team1Score), team2Score: parseInt(team2Score), completed: true } : m) : round
+      );
+    }
     updateData({ americanoData: data });
     setScoreModal(null);
   };
 
-  // 다음 라운드 생성 (관리자 버튼)
-  const addNextRound = () => {
+  const addNextRound = (groupIdx) => {
     const data = { ...americanoData };
-    let nextRound;
-    if (tournament.americanoType === "mexicano") {
-      nextRound = generateMexicanoNextRound(data.players, data.rounds, data.byeTracker);
+    const isMexicano = tournament.americanoType === "mexicano";
+    if (data.useGroups && groupIdx != null) {
+      const phase = data.phase === "final" ? "finalGroups" : "groups";
+      const gArr = [...data[phase]];
+      const g = { ...gArr[groupIdx] };
+      const nextRound = generateGroupNextRound(g, isMexicano);
+      g.rounds = [...g.rounds, nextRound];
+      gArr[groupIdx] = g;
+      data[phase] = gArr;
     } else {
-      // 아메리카노: 기존 히스토리 기반으로 새 라운드 생성
-      nextRound = generateAmericanoNextRound(data.players, data.rounds);
+      let nextRound;
+      if (isMexicano) {
+        nextRound = generateMexicanoNextRound(data.players, data.rounds, data.byeTracker);
+      } else {
+        nextRound = generateAmericanoNextRound(data.players, data.rounds);
+      }
+      data.rounds = [...data.rounds, nextRound];
     }
-    data.rounds = [...data.rounds, nextRound];
     updateData({ americanoData: data });
   };
 
-  // 대회 종료 (관리자 버튼)
   const finishAmericano = () => {
     onUpdateTournament(tournament.id, { stage: "completed" });
   };
 
-  // 대진표 재설정 (라운드 전체 초기화 후 첫 라운드 새로 생성)
+  const doAdvanceToFinal = () => {
+    const isMexicano = tournament.americanoType === "mexicano";
+    const newData = advanceAmericanoToFinal(americanoData, isMexicano, lang);
+    updateData({ americanoData: newData });
+  };
+
   const resetAmericano = () => {
     if (!americanoData?.players) return;
     const players = americanoData.players;
-    const data = generateAmericanoRounds(players, 1, tournament.americanoType === "team", tournament.americanoType === "mexicano");
-    updateData({ americanoData: { ...data, players } });
+    const isMexicano = tournament.americanoType === "mexicano";
+    if (players.length >= 8) {
+      updateData({ americanoData: generateAmericanoGroupStage(players, isMexicano) });
+    } else {
+      const data = generateAmericanoRounds(players, 1, tournament.americanoType === "team", isMexicano);
+      updateData({ americanoData: { ...data, players } });
+    }
+  };
+
+  // 그룹 렌더링 헬퍼 (조별/결승 공용)
+  const renderAmericanoGroup = (group, groupIdx, phase) => {
+    const standings = calcAmericanoStandings(group.players, group.rounds);
+    const lastRound = group.rounds[group.rounds.length - 1];
+    const lastRoundDone = lastRound?.every((m) => m.completed);
+    const isGroupPhase = phase === "group";
+    const promotionCount = 2; // 상위 2명 승자조
+
+    return (
+      <Card key={group.name} style={{ marginBottom: 16 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: colors.primary }}>
+          {group.name}{isGroupPhase ? (lang === "ko" ? "조" : " Group") : ""}
+        </h3>
+
+        {/* 순위 */}
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: `2px solid ${colors.gray200}` }}>
+              <th style={{ padding: "6px 4px", textAlign: "left" }}>#</th>
+              <th style={{ padding: "6px 4px", textAlign: "left" }}>{T("playerName")}</th>
+              <th style={{ padding: "6px 4px", textAlign: "center" }}>{T("played")}</th>
+              <th style={{ padding: "6px 4px", textAlign: "center" }}>{T("points")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {standings.map((s, i) => (
+              <tr key={s.player.id} style={{
+                borderBottom: `1px solid ${colors.gray100}`,
+                background: isGroupPhase && i < promotionCount ? colors.successLight : "transparent",
+              }}>
+                <td style={{ padding: "6px 4px", fontWeight: 700 }}>{i + 1}</td>
+                <td style={{ padding: "6px 4px" }}>{s.player.name}</td>
+                <td style={{ padding: "6px 4px", textAlign: "center" }}>{s.played}</td>
+                <td style={{ padding: "6px 4px", textAlign: "center", fontWeight: 700 }}>{s.points}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* 라운드 */}
+        {group.rounds.map((round, ri) => {
+          const roundDone = round.every((m) => m.completed);
+          return (
+            <div key={ri} style={{ marginBottom: 8, padding: 10, background: colors.gray50, borderRadius: 8, opacity: roundDone && ri < group.rounds.length - 1 ? 0.6 : 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: roundDone ? colors.gray400 : colors.primary, marginBottom: 6 }}>
+                {T("round")} {ri + 1} {roundDone ? "✓" : ""}
+              </div>
+              {round.map((m) => (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${colors.gray100}` }}>
+                  <div style={{ flex: 1, fontSize: 13 }}>
+                    <span>{m.team1?.map((pid) => getTeamName(pid)).join(" & ")}</span>
+                    <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
+                    <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
+                  </div>
+                  {m.completed ? (
+                    <span style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8 }}>{m.team1Score} - {m.team2Score}</span>
+                  ) : isAdmin ? (
+                    <Btn size="sm" onClick={() => setScoreModal({ type: "americano", roundIdx: ri, match: m, groupIdx })}>{T("enterScore")}</Btn>
+                  ) : (
+                    <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+
+        {/* 관리자: 그룹 내 다음 라운드 */}
+        {isAdmin && tournament.stage === "ongoing" && (
+          <div style={{ marginTop: 8 }}>
+            <Btn size="sm" onClick={() => addNextRound(groupIdx)} disabled={!lastRoundDone}>
+              <Icon name="plus" size={14} />{lang === "ko" ? "다음 라운드" : "Next Round"}
+            </Btn>
+          </div>
+        )}
+      </Card>
+    );
   };
 
   // AMERICANO VIEW
   if (tournament.type === "americano" && americanoData) {
+    // 그룹 스테이지 방식
+    if (americanoData.useGroups) {
+      const phase = americanoData.phase || "group";
+      const activeGroups = phase === "final" ? (americanoData.finalGroups || []) : (americanoData.groups || []);
+      const allGroupsDone = activeGroups.every(g => g.rounds.length > 0 && g.rounds.every(r => r.every(m => m.completed)));
+
+      return (
+        <div>
+          {/* 페이즈 표시 + 관리자 버튼 */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <Badge type={phase === "final" ? "warning" : "info"}>
+              {phase === "final" ? (lang === "ko" ? "결승 라운드" : "Final Round") : (lang === "ko" ? "조별 리그" : "Group Stage")}
+            </Badge>
+            {isAdmin && tournament.stage === "ongoing" && (
+              <Btn size="sm" variant="outline" onClick={resetAmericano}>
+                {lang === "ko" ? "대진표 재설정" : "Reset Bracket"}
+              </Btn>
+            )}
+          </div>
+
+          {/* 그룹들 */}
+          {activeGroups.map((g, gi) => renderAmericanoGroup(g, gi, phase))}
+
+          {/* 관리자: 단계 전환 / 종료 */}
+          {isAdmin && tournament.stage === "ongoing" && (
+            <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "center" }}>
+              {phase === "group" && (
+                <Btn onClick={doAdvanceToFinal} disabled={!allGroupsDone}>
+                  {lang === "ko" ? "결승 라운드로 →" : "Advance to Finals →"}
+                </Btn>
+              )}
+              <Btn variant="danger" onClick={finishAmericano}>
+                {lang === "ko" ? "대회 종료" : "End Tournament"}
+              </Btn>
+            </div>
+          )}
+
+          {scoreModal?.type === "americano" && (
+            <ScoreModal
+              match={scoreModal.match}
+              homeName={scoreModal.match.team1?.map((pid) => getTeamName(pid)).join(" & ")}
+              awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
+              isAmericano
+              onSave={(s1, s2) => saveAmericanoScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, scoreModal.groupIdx)}
+              onClose={() => setScoreModal(null)}
+              T={T}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // 기존 플랫 방식 (7명 이하 또는 레거시)
     const { rounds, players } = americanoData;
     const standings = calcAmericanoStandings(players, rounds);
+    const lastRound = rounds[rounds.length - 1];
+    const lastRoundDone = lastRound?.every((m) => m.completed);
 
     return (
       <div>
-        {/* 관리자: 대진표 재설정 */}
         {isAdmin && tournament.stage === "ongoing" && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
             <Btn size="sm" variant="outline" onClick={resetAmericano}>
@@ -3356,81 +3620,69 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          {/* Rounds */}
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{T("round")}</h3>
-            {rounds.map((round, ri) => {
-              const roundDone = round.every((m) => m.completed);
-              return (
-                <Card key={ri} style={{ marginBottom: 12, opacity: roundDone ? 0.7 : 1 }}>
-                  <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: roundDone ? colors.gray400 : colors.primary }}>
-                    {T("round")} {ri + 1} {roundDone ? "✓" : ri === rounds.length - 1 ? (lang === "ko" ? "진행 중" : "In Progress") : ""}
-                  </h4>
-                  {round.map((m) => (
-                    <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${colors.gray100}` }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13 }}>
-                          {m.team1?.map((pid) => getTeamName(pid)).join(" & ")}
-                        </div>
-                        <div style={{ fontSize: 11, color: colors.gray400 }}>{T("vs")}</div>
-                        <div style={{ fontSize: 13 }}>
-                          {m.team2?.map((pid) => getTeamName(pid)).join(" & ")}
-                        </div>
-                      </div>
-                      {m.completed ? (
-                        <div style={{ fontWeight: 700, fontSize: 16 }}>{m.team1Score} - {m.team2Score}</div>
-                      ) : isAdmin ? (
-                        <Btn size="sm" onClick={() => setScoreModal({ type: "americano", roundIdx: ri, match: m })}>{T("enterScore")}</Btn>
-                      ) : (
-                        <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
-                      )}
-                    </div>
-                  ))}
-                </Card>
-              );
-            })}
+        {/* 순위 */}
+        <Card style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{T("standings")}</h3>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${colors.gray200}` }}>
+                <th style={{ padding: "8px 4px", textAlign: "left" }}>#</th>
+                <th style={{ padding: "8px 4px", textAlign: "left" }}>{T("playerName")}</th>
+                <th style={{ padding: "8px 4px", textAlign: "center" }}>{T("played")}</th>
+                <th style={{ padding: "8px 4px", textAlign: "center" }}>{T("points")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {standings.map((s, i) => (
+                <tr key={s.player.id} style={{ borderBottom: `1px solid ${colors.gray100}`, background: i < 3 ? colors.successLight : "transparent" }}>
+                  <td style={{ padding: "8px 4px", fontWeight: 700 }}>{i + 1}</td>
+                  <td style={{ padding: "8px 4px" }}>{s.player.name}</td>
+                  <td style={{ padding: "8px 4px", textAlign: "center" }}>{s.played}</td>
+                  <td style={{ padding: "8px 4px", textAlign: "center", fontWeight: 700 }}>{s.points}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
 
-            {/* 관리자: 다음 라운드 생성 + 대회 종료 버튼 */}
-            {isAdmin && tournament.stage === "ongoing" && (
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <Btn onClick={addNextRound} disabled={rounds.length > 0 && !rounds[rounds.length - 1].every((m) => m.completed)}>
-                  <Icon name="plus" size={14} />{lang === "ko" ? "다음 라운드 생성" : "Next Round"}
-                </Btn>
-                <Btn variant="danger" onClick={finishAmericano}>
-                  {lang === "ko" ? "대회 종료" : "End Tournament"}
-                </Btn>
-              </div>
-            )}
-          </div>
-
-          {/* Standings */}
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{T("standings")}</h3>
-            <Card>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-                <thead>
-                  <tr style={{ borderBottom: `2px solid ${colors.gray200}` }}>
-                    <th style={{ padding: "8px 4px", textAlign: "left" }}>#</th>
-                    <th style={{ padding: "8px 4px", textAlign: "left" }}>{T("playerName")}</th>
-                    <th style={{ padding: "8px 4px", textAlign: "center" }}>{T("played")}</th>
-                    <th style={{ padding: "8px 4px", textAlign: "center" }}>{T("points")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {standings.map((s, i) => (
-                    <tr key={s.player.id} style={{ borderBottom: `1px solid ${colors.gray100}`, background: i < 3 ? colors.successLight : "transparent" }}>
-                      <td style={{ padding: "8px 4px", fontWeight: 700 }}>{i + 1}</td>
-                      <td style={{ padding: "8px 4px" }}>{s.player.name}</td>
-                      <td style={{ padding: "8px 4px", textAlign: "center" }}>{s.played}</td>
-                      <td style={{ padding: "8px 4px", textAlign: "center", fontWeight: 700 }}>{s.points}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* 라운드 */}
+        {rounds.map((round, ri) => {
+          const roundDone = round.every((m) => m.completed);
+          return (
+            <Card key={ri} style={{ marginBottom: 12, opacity: roundDone && ri < rounds.length - 1 ? 0.6 : 1 }}>
+              <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: roundDone ? colors.gray400 : colors.primary }}>
+                {T("round")} {ri + 1} {roundDone ? "✓" : ""}
+              </h4>
+              {round.map((m) => (
+                <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${colors.gray100}` }}>
+                  <div style={{ flex: 1, fontSize: 13 }}>
+                    <span>{m.team1?.map((pid) => getTeamName(pid)).join(" & ")}</span>
+                    <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
+                    <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
+                  </div>
+                  {m.completed ? (
+                    <span style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8 }}>{m.team1Score} - {m.team2Score}</span>
+                  ) : isAdmin ? (
+                    <Btn size="sm" onClick={() => setScoreModal({ type: "americano", roundIdx: ri, match: m })}>{T("enterScore")}</Btn>
+                  ) : (
+                    <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
+                  )}
+                </div>
+              ))}
             </Card>
+          );
+        })}
+
+        {isAdmin && tournament.stage === "ongoing" && (
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Btn onClick={() => addNextRound()} disabled={!lastRoundDone}>
+              <Icon name="plus" size={14} />{lang === "ko" ? "다음 라운드 생성" : "Next Round"}
+            </Btn>
+            <Btn variant="danger" onClick={finishAmericano}>
+              {lang === "ko" ? "대회 종료" : "End Tournament"}
+            </Btn>
           </div>
-        </div>
+        )}
 
         {scoreModal?.type === "americano" && (
           <ScoreModal
