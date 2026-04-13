@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "3.5";
+const APP_VERSION = "3.6";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2513,15 +2513,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
     const maxT = parseInt(tournament.maxTeams);
 
     if (tournament.type === "americano") {
-      const players = confirmedRegs.map((r) => ({ id: r.id, name: r.playerName }));
-      const isMexicano = tournament.americanoType === "mexicano";
-      if (players.length >= 8) {
-        // 8명 이상: 4명씩 그룹 스테이지
-        updates.americanoData = generateAmericanoGroupStage(players, isMexicano);
-      } else {
-        // 7명 이하: 기존 플랫 방식
-        updates.americanoData = { ...generateAmericanoRounds(players, 1, tournament.americanoType === "team", isMexicano), players };
-      }
+      // 대진표는 시작 후 "대진표 생성" 버튼으로 별도 생성
     } else if (needsGroupDraw(tournament.type, maxT)) {
       // Don't auto-generate groups — let admin use Draw button or manual assignment
     } else {
@@ -3501,9 +3493,11 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     updateData({ americanoData: newData });
   };
 
-  const resetAmericano = () => {
-    if (!americanoData?.players) return;
-    const players = americanoData.players;
+  // 대진표 생성 (시작 후 별도 버튼) 또는 재설정
+  const generateAmericanoBracket = () => {
+    const confirmedForAmericano = tournament.registrations?.filter((r) => r.status === "confirmed") || [];
+    const players = confirmedForAmericano.map((r) => ({ id: r.id, name: r.playerName }));
+    if (players.length < 4) return;
     const isMexicano = tournament.americanoType === "mexicano";
     if (players.length >= 8) {
       updateData({ americanoData: generateAmericanoGroupStage(players, isMexicano) });
@@ -3592,7 +3586,33 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     );
   };
 
-  // AMERICANO VIEW
+  // AMERICANO VIEW: 대진표 미생성 상태
+  if (tournament.type === "americano" && !americanoData) {
+    const confirmedCount = (tournament.registrations?.filter((r) => r.status === "confirmed") || []).length;
+    return (
+      <div style={{ textAlign: "center", padding: "40px 20px" }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>{"🎾"}</div>
+        <h3 style={{ fontSize: 18, fontWeight: 700, color: colors.gray800, marginBottom: 8 }}>
+          {lang === "ko" ? "대진표를 생성해주세요" : "Generate the bracket"}
+        </h3>
+        <p style={{ fontSize: 14, color: colors.gray500, marginBottom: 20 }}>
+          {lang === "ko" ? `확정 참가자: ${confirmedCount}명` : `Confirmed: ${confirmedCount} players`}
+        </p>
+        {isAdmin && tournament.stage === "ongoing" && (
+          <Btn onClick={generateAmericanoBracket} disabled={confirmedCount < 4}>
+            {lang === "ko" ? "대진표 생성" : "Generate Bracket"}
+          </Btn>
+        )}
+        {confirmedCount < 4 && (
+          <p style={{ fontSize: 12, color: colors.warning, marginTop: 8 }}>
+            {lang === "ko" ? "최소 4명 이상 필요합니다" : "Minimum 4 players required"}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // AMERICANO VIEW: 대진표 생성 완료
   if (tournament.type === "americano" && americanoData) {
     // 그룹 스테이지 방식
     if (americanoData.useGroups) {
@@ -3608,7 +3628,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               {phase === "final" ? (lang === "ko" ? "결승 라운드" : "Final Round") : (lang === "ko" ? "조별 리그" : "Group Stage")}
             </Badge>
             {isAdmin && tournament.stage === "ongoing" && (
-              <Btn size="sm" variant="outline" onClick={resetAmericano}>
+              <Btn size="sm" variant="outline" onClick={generateAmericanoBracket}>
                 {lang === "ko" ? "대진표 재설정" : "Reset Bracket"}
               </Btn>
             )}
@@ -3656,7 +3676,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
       <div>
         {isAdmin && tournament.stage === "ongoing" && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-            <Btn size="sm" variant="outline" onClick={resetAmericano}>
+            <Btn size="sm" variant="outline" onClick={generateAmericanoBracket}>
               {lang === "ko" ? "대진표 재설정" : "Reset Bracket"}
             </Btn>
           </div>
