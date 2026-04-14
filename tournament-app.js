@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.0";
+const APP_VERSION = "5.1";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2727,6 +2727,20 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
     onUpdateTournament(tournament.id, updates);
   };
 
+  // 시작 취소 — 대회를 신청 단계로 되돌리고 생성된 대진표/그룹을 모두 초기화
+  const revertToRegistration = () => {
+    const msg = lang === "ko"
+      ? "토너먼트를 신청 단계로 되돌립니다. 생성된 대진표, 조, 점수가 모두 삭제됩니다. 계속하시겠습니까?"
+      : "Revert tournament to registration stage? All generated brackets, groups, and scores will be removed.";
+    if (!window.confirm(msg)) return;
+    onUpdateTournament(tournament.id, {
+      stage: "registration",
+      groups: null,
+      knockoutBracket: null,
+      americanoData: null,
+    });
+  };
+
   // Generate groups (auto draw)
   const doGroupDraw = () => {
     const teams = confirmedRegs.map((r) => ({ id: r.id, name: r.teamName || r.playerName }));
@@ -2825,6 +2839,11 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
         </div>
         {isAdmin && tournament.stage === "registration" && confirmedRegs.length >= 2 && (
           <Btn variant="success" onClick={startTournament}>{T("startTournament")}</Btn>
+        )}
+        {isAdmin && tournament.stage === "ongoing" && (
+          <Btn variant="outline" size="sm" onClick={revertToRegistration}>
+            {lang === "ko" ? "시작 전으로" : "Revert to Registration"}
+          </Btn>
         )}
       </div>
 
