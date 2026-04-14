@@ -80,8 +80,6 @@ fetch("tournament-app.js")
   const ua = navigator.userAgent;
   const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
   const isIOSSafari = isIOS && /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
-  const dismissedUntil = parseInt(localStorage.getItem("ps_install_dismissed_until") || "0", 10);
-  if (Date.now() < dismissedUntil) return;
 
   let deferredPrompt = null;
 
@@ -134,7 +132,7 @@ fetch("tournament-app.js")
     close.style.cssText = "background:transparent;color:#b8d4c3;border:none;font-size:18px;cursor:pointer;padding:4px 8px;flex-shrink:0";
     close.onclick = () => {
       wrap.remove();
-      localStorage.setItem("ps_install_dismissed_until", String(Date.now() + 7 * 24 * 60 * 60 * 1000));
+      // 설치되기 전까진 다음 방문 시 다시 표시
     };
     wrap.appendChild(close);
 
@@ -163,7 +161,6 @@ fetch("tournament-app.js")
 
   window.addEventListener("appinstalled", () => {
     document.getElementById("ps-install-banner")?.remove();
-    localStorage.setItem("ps_install_dismissed_until", String(Date.now() + 365 * 24 * 60 * 60 * 1000));
   });
 
   // iOS Safari: beforeinstallprompt 미지원 → 수동 안내
