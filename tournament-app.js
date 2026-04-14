@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "4.6";
+const APP_VERSION = "4.7";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -29,6 +29,7 @@ const translations = {
     americanoNormal: "아메리카노",
     americanoMexicano: "멕시카노",
     americanoTeam: "팀 아메리카노",
+    americanoSelection: "선발전 (12명)",
     roundRobinGames: "라운드로빈 게임 수",
     knockoutFormat: "녹아웃 스테이지 포맷",
     set3: "3세트",
@@ -235,6 +236,7 @@ const translations = {
     americanoNormal: "Americano",
     americanoMexicano: "Mexicano",
     americanoTeam: "Team Americano",
+    americanoSelection: "Selection (12P)",
     roundRobinGames: "Round Robin Games",
     knockoutFormat: "Knockout Stage Format",
     set3: "3 Sets",
@@ -1142,6 +1144,152 @@ function advanceAmericanoToFinal(americanoData, isMexicano, lang) {
 }
 
 // ============================================================
+// SELECTION TOURNAMENT (선발전) - 12 players
+// Stage 1: 3 groups of 4 → top 1 per group + best 2nd place = 4 auto-qualified
+// Stage 2: remaining 8 split by points (1,3,5,7 vs 2,4,6,8) → top 2 per group
+// Total survivors: 8
+// ============================================================
+function generateAmericanoSelectionStage(players, useSeeds = false) {
+  if (players.length !== 12) {
+    throw new Error("Selection tournament requires exactly 12 players");
+  }
+  const numGroups = 3;
+  const groupNames = ["A", "B", "C"];
+
+  let ordered;
+  if (useSeeds) {
+    const seeded = players.filter((p) => p.seed).sort((a, b) => a.seed - b.seed);
+    const unseeded = players.filter((p) => !p.seed).sort(() => Math.random() - 0.5);
+    ordered = [...seeded, ...unseeded];
+  } else {
+    ordered = [...players].sort(() => Math.random() - 0.5);
+  }
+
+  // 스네이크 시딩으로 3조 배분
+  const groupBuckets = Array.from({ length: numGroups }, () => []);
+  ordered.forEach((p, i) => {
+    const row = Math.floor(i / numGroups);
+    const col = i % numGroups;
+    const gi = row % 2 === 0 ? col : (numGroups - 1 - col);
+    groupBuckets[gi].push(p);
+  });
+
+  const groups = [];
+  for (let g = 0; g < numGroups; g++) {
+    const gPlayers = groupBuckets[g];
+    const byeTracker = {};
+    gPlayers.forEach(p => { byeTracker[p.id] = 0; });
+
+    const s = [...gPlayers].sort(() => Math.random() - 0.5);
+    const firstRound = [];
+    for (let i = 0; i < s.length - 3; i += 4) {
+      firstRound.push({
+        id: generateId(),
+        team1: [s[i].id, s[i + 1].id],
+        team2: [s[i + 2].id, s[i + 3].id],
+        team1Score: null, team2Score: null, completed: false,
+      });
+    }
+
+    groups.push({
+      name: groupNames[g],
+      players: gPlayers,
+      rounds: [firstRound],
+      byeTracker,
+    });
+  }
+
+  return {
+    isSelection: true,
+    players,
+    useGroups: true,
+    phase: "stage1",
+    groups,
+    stage2Groups: null,
+    autoQualified: null,
+    survivors: null,
+  };
+}
+
+// Stage 1 → Stage 2 전환
+function advanceSelectionToStage2(americanoData, lang) {
+  const { groups } = americanoData;
+
+  // 각 조의 순위 계산
+  const groupStandings = groups.map(g => calcAmericanoStandings(g.players, g.rounds));
+
+  // 각 조 1등 (3명) — auto qualified
+  const groupWinners = groupStandings.map(st => st[0]);
+
+  // 각 조 2등들 중 포인트 최고 (1명)
+  const runnerUps = groupStandings.map(st => st[1]);
+  runnerUps.sort((a, b) => b.points - a.points);
+  const bestRunnerUp = runnerUps[0];
+
+  const autoQualified = [
+    ...groupWinners.map(s => s.player),
+    bestRunnerUp.player,
+  ];
+  const autoQualifiedIds = new Set(autoQualified.map(p => p.id));
+
+  // 나머지 8명 포인트순 정렬
+  const remaining = [];
+  groupStandings.forEach(st => st.forEach(s => {
+    if (!autoQualifiedIds.has(s.player.id)) remaining.push(s);
+  }));
+  remaining.sort((a, b) => b.points - a.points);
+
+  // 스네이크: 1,3,5,7 → 조1 / 2,4,6,8 → 조2
+  const stage2G1 = [];
+  const stage2G2 = [];
+  remaining.forEach((s, i) => {
+    if (i % 2 === 0) stage2G1.push(s.player);
+    else stage2G2.push(s.player);
+  });
+
+  function createStage2Group(name, players) {
+    const byeTracker = {};
+    players.forEach(p => { byeTracker[p.id] = 0; });
+    const s = [...players].sort(() => Math.random() - 0.5);
+    const firstRound = [];
+    for (let i = 0; i < s.length - 3; i += 4) {
+      firstRound.push({
+        id: generateId(),
+        team1: [s[i].id, s[i + 1].id],
+        team2: [s[i + 2].id, s[i + 3].id],
+        team1Score: null, team2Score: null, completed: false,
+      });
+    }
+    return { name, players, rounds: [firstRound], byeTracker };
+  }
+
+  return {
+    ...americanoData,
+    phase: "stage2",
+    autoQualified,
+    stage2Groups: [
+      createStage2Group("1", stage2G1),
+      createStage2Group("2", stage2G2),
+    ],
+  };
+}
+
+// Stage 2 완료 → 최종 생존자 8명 계산
+function finalizeSelection(americanoData) {
+  const { stage2Groups, autoQualified } = americanoData;
+  const stage2Qualifiers = [];
+  stage2Groups.forEach(g => {
+    const st = calcAmericanoStandings(g.players, g.rounds);
+    st.slice(0, 2).forEach(s => stage2Qualifiers.push(s.player));
+  });
+  return {
+    ...americanoData,
+    phase: "complete",
+    survivors: [...autoQualified, ...stage2Qualifiers],
+  };
+}
+
+// ============================================================
 // ICONS (inline SVG)
 // ============================================================
 const Icon = ({ name, size = 20 }) => {
@@ -1449,6 +1597,16 @@ export default function App() {
           if (americanoData.finalGroups) {
             const fg = americanoData.finalGroups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
             americanoData = { ...americanoData, finalGroups: fg }; changed = true;
+          }
+          if (americanoData.stage2Groups) {
+            const sg = americanoData.stage2Groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
+            americanoData = { ...americanoData, stage2Groups: sg }; changed = true;
+          }
+          if (americanoData.autoQualified) {
+            americanoData = { ...americanoData, autoQualified: americanoData.autoQualified.map((p) => p.name === oldName ? { ...p, name: newName } : p) }; changed = true;
+          }
+          if (americanoData.survivors) {
+            americanoData = { ...americanoData, survivors: americanoData.survivors.map((p) => p.name === oldName ? { ...p, name: newName } : p) }; changed = true;
           }
         }
         return changed ? { ...t, registrations: regs, groups: updatedGroups || t.groups, knockoutBracket: updatedKnockout || t.knockoutBracket, americanoData } : t;
@@ -2283,20 +2441,23 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
         {form.type === "americano" && (
           <>
             <FormField label={T("americanoType")}>
-              <div style={{ display: "flex", gap: 8 }}>
-                {["normal", "mexicano", "team"].map((at) => (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {["normal", "mexicano", "team", "selection"].map((at) => (
                   <button
                     key={at}
-                    onClick={() => set("americanoType", at)}
+                    onClick={() => {
+                      set("americanoType", at);
+                      if (at === "selection") set("americanoPlayers", "12");
+                    }}
                     style={{
-                      flex: 1, padding: "10px", borderRadius: 8, fontWeight: 600, cursor: "pointer",
+                      padding: "10px", borderRadius: 8, fontWeight: 600, cursor: "pointer",
                       border: `2px solid ${form.americanoType === at ? colors.primary : colors.gray200}`,
                       background: form.americanoType === at ? colors.primaryLight : colors.white,
                       color: form.americanoType === at ? colors.primary : colors.gray600,
                       fontSize: 13,
                     }}
                   >
-                    {at === "normal" ? T("americanoNormal") : at === "mexicano" ? T("americanoMexicano") : T("americanoTeam")}
+                    {at === "normal" ? T("americanoNormal") : at === "mexicano" ? T("americanoMexicano") : at === "team" ? T("americanoTeam") : T("americanoSelection")}
                   </button>
                 ))}
               </div>
@@ -2305,8 +2466,11 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
               <FormField label={T("americanoPlayers")}>
                 <select value={form.americanoPlayers} onChange={(e) => {
                   set("americanoPlayers", e.target.value);
-                }} style={inputStyle}>
-                  {Array.from({ length: 17 }, (_, i) => i + 4).map((n) => <option key={n} value={n}>{n}</option>)}
+                }} style={inputStyle} disabled={form.americanoType === "selection"}>
+                  {form.americanoType === "selection"
+                    ? <option value="12">12</option>
+                    : Array.from({ length: 17 }, (_, i) => i + 4).map((n) => <option key={n} value={n}>{n}</option>)
+                  }
                 </select>
               </FormField>
               <FormField label={T("americanoPointsPerMatch")}>
@@ -3223,6 +3387,15 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
       if (americanoData.finalGroups) {
         americanoData = { ...americanoData, finalGroups: americanoData.finalGroups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) })) };
       }
+      if (americanoData.stage2Groups) {
+        americanoData = { ...americanoData, stage2Groups: americanoData.stage2Groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) })) };
+      }
+      if (americanoData.autoQualified) {
+        americanoData = { ...americanoData, autoQualified: americanoData.autoQualified.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) };
+      }
+      if (americanoData.survivors) {
+        americanoData = { ...americanoData, survivors: americanoData.survivors.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) };
+      }
     }
 
     // RR 그룹/녹아웃 대진표 동기화
@@ -3542,7 +3715,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   const saveAmericanoScore = (roundIdx, matchId, team1Score, team2Score, groupIdx) => {
     const data = { ...americanoData };
     if (data.useGroups && groupIdx != null) {
-      const phase = data.phase === "final" ? "finalGroups" : "groups";
+      const phase = data.phase === "final" ? "finalGroups" : data.phase === "stage2" ? "stage2Groups" : "groups";
       const gArr = [...data[phase]];
       const g = { ...gArr[groupIdx] };
       g.rounds = g.rounds.map((round, ri) =>
@@ -3563,7 +3736,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     const data = { ...americanoData };
     const isMexicano = tournament.americanoType === "mexicano";
     if (data.useGroups && groupIdx != null) {
-      const phase = data.phase === "final" ? "finalGroups" : "groups";
+      const phase = data.phase === "final" ? "finalGroups" : data.phase === "stage2" ? "stage2Groups" : "groups";
       const gArr = [...data[phase]];
       const g = { ...gArr[groupIdx] };
       const nextRound = generateGroupNextRound(g, isMexicano);
@@ -3592,6 +3765,16 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     updateData({ americanoData: newData });
   };
 
+  const doAdvanceSelectionStage2 = () => {
+    const newData = advanceSelectionToStage2(americanoData, lang);
+    updateData({ americanoData: newData });
+  };
+
+  const doFinalizeSelection = () => {
+    const newData = finalizeSelection(americanoData);
+    updateData({ americanoData: newData });
+  };
+
   // 대진표 초기화 (americanoData를 null로 → 생성 전 화면으로)
   const clearAmericanoBracket = () => {
     updateData({ americanoData: null });
@@ -3601,6 +3784,13 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   const generateAmericanoBracket = () => {
     const confirmedForAmericano = tournament.registrations?.filter((r) => r.status === "confirmed") || [];
     let players = confirmedForAmericano.map((r) => ({ id: r.id, name: r.playerName, seed: r.seed || null }));
+    const isSelection = tournament.americanoType === "selection";
+    if (isSelection) {
+      if (players.length !== 12) return;
+      const hasSeeds = players.some((p) => p.seed);
+      updateData({ americanoData: generateAmericanoSelectionStage(players, hasSeeds) });
+      return;
+    }
     if (players.length < 4) return;
     const isMexicano = tournament.americanoType === "mexicano";
     if (players.length >= 8) {
@@ -3614,12 +3804,11 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   };
 
   // 그룹 렌더링 헬퍼 (조별/결승 공용)
-  const renderAmericanoGroup = (group, groupIdx, phase) => {
+  const renderAmericanoGroup = (group, groupIdx, phase, promotionCount = 2) => {
     const standings = calcAmericanoStandings(group.players, group.rounds);
     const lastRound = group.rounds[group.rounds.length - 1];
     const lastRoundDone = lastRound?.every((m) => m.completed);
-    const isGroupPhase = phase === "group";
-    const promotionCount = 2; // 상위 2명 승자조
+    const isGroupPhase = phase === "group" || phase === "stage1" || phase === "stage2";
 
     return (
       <Card key={group.name} style={{ marginBottom: 16 }}>
@@ -3697,6 +3886,9 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     const confirmedRegsForDraw = tournament.registrations?.filter((r) => r.status === "confirmed") || [];
     const confirmedCount = confirmedRegsForDraw.length;
     const hasSeeds = confirmedRegsForDraw.some((r) => r.seed);
+    const isSelection = tournament.americanoType === "selection";
+    const selectionReady = isSelection && confirmedCount === 12;
+    const canGenerate = isSelection ? selectionReady : confirmedCount >= 4;
 
     const setAmericanoSeed = (regId, seedVal) => {
       const newRegs = (tournament.registrations || []).map((r) => r.id === regId ? { ...r, seed: seedVal ? parseInt(seedVal) : null } : r);
@@ -3711,7 +3903,8 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
           </h3>
           <p style={{ fontSize: 14, color: colors.gray500 }}>
             {lang === "ko" ? `확정 참가자: ${confirmedCount}명` : `Confirmed: ${confirmedCount} players`}
-            {confirmedCount >= 8 && (lang === "ko" ? ` → ${Math.floor(confirmedCount / 4)}개 조` : ` → ${Math.floor(confirmedCount / 4)} groups`)}
+            {!isSelection && confirmedCount >= 8 && (lang === "ko" ? ` → ${Math.floor(confirmedCount / 4)}개 조` : ` → ${Math.floor(confirmedCount / 4)} groups`)}
+            {isSelection && (lang === "ko" ? " (선발전: 정확히 12명 필요)" : " (Selection: exactly 12 required)")}
           </p>
         </div>
 
@@ -3744,15 +3937,17 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
 
         {isAdmin && tournament.stage === "ongoing" && (
           <div style={{ textAlign: "center" }}>
-            <Btn onClick={generateAmericanoBracket} disabled={confirmedCount < 4}>
+            <Btn onClick={generateAmericanoBracket} disabled={!canGenerate}>
               {lang === "ko" ? "대진표 생성" : "Generate Bracket"}
               {hasSeeds && (lang === "ko" ? " (시드 적용)" : " (seeded)")}
             </Btn>
           </div>
         )}
-        {confirmedCount < 4 && (
+        {!canGenerate && (
           <p style={{ fontSize: 12, color: colors.warning, textAlign: "center", marginTop: 8 }}>
-            {lang === "ko" ? "최소 4명 이상 필요합니다" : "Minimum 4 players required"}
+            {isSelection
+              ? (lang === "ko" ? `선발전은 정확히 12명이 필요합니다 (현재 ${confirmedCount}명)` : `Selection requires exactly 12 players (currently ${confirmedCount})`)
+              : (lang === "ko" ? "최소 4명 이상 필요합니다" : "Minimum 4 players required")}
           </p>
         )}
       </div>
@@ -3763,16 +3958,37 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   if (tournament.type === "americano" && americanoData) {
     // 그룹 스테이지 방식
     if (americanoData.useGroups) {
+      const isSelection = americanoData.isSelection;
       const phase = americanoData.phase || "group";
-      const activeGroups = phase === "final" ? (americanoData.finalGroups || []) : (americanoData.groups || []);
-      const allGroupsDone = activeGroups.every(g => g.rounds.length > 0 && g.rounds.every(r => r.every(m => m.completed)));
+
+      let activeGroups;
+      if (isSelection) {
+        activeGroups = phase === "stage1" ? (americanoData.groups || [])
+          : phase === "stage2" ? (americanoData.stage2Groups || [])
+          : [];
+      } else {
+        activeGroups = phase === "final" ? (americanoData.finalGroups || []) : (americanoData.groups || []);
+      }
+      const allGroupsDone = activeGroups.length > 0 && activeGroups.every(g => g.rounds.length > 0 && g.rounds.every(r => r.every(m => m.completed)));
+
+      // Selection phase용 렌더러: top1만 하이라이트(stage1) 또는 top2 하이라이트(stage2)
+      const renderSelectionGroup = (group, groupIdx) => {
+        const promotionCount = phase === "stage1" ? 1 : 2;
+        return renderAmericanoGroup(group, groupIdx, phase, promotionCount);
+      };
+
+      const phaseLabel = isSelection
+        ? (phase === "stage1" ? (lang === "ko" ? "Stage 1 — 조별리그 (3조)" : "Stage 1 — Groups (3)")
+          : phase === "stage2" ? (lang === "ko" ? "Stage 2 — 생존전 (2조)" : "Stage 2 — Survival (2)")
+          : (lang === "ko" ? "선발 완료" : "Selection Complete"))
+        : (phase === "final" ? (lang === "ko" ? "결승 라운드" : "Final Round") : (lang === "ko" ? "조별 리그" : "Group Stage"));
 
       return (
         <div>
           {/* 페이즈 표시 + 관리자 버튼 */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <Badge type={phase === "final" ? "warning" : "info"}>
-              {phase === "final" ? (lang === "ko" ? "결승 라운드" : "Final Round") : (lang === "ko" ? "조별 리그" : "Group Stage")}
+            <Badge type={phase === "final" || phase === "stage2" || phase === "complete" ? "warning" : "info"}>
+              {phaseLabel}
             </Badge>
             {isAdmin && tournament.stage === "ongoing" && (
               <div style={{ display: "flex", gap: 6 }}>
@@ -3786,15 +4002,59 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
             )}
           </div>
 
+          {/* 선발전 stage2/complete: 자동통과자 4명 표시 */}
+          {isSelection && (phase === "stage2" || phase === "complete") && americanoData.autoQualified && (
+            <Card style={{ marginBottom: 16, background: colors.successLight, border: `1px solid ${colors.success}` }}>
+              <h4 style={{ fontSize: 14, fontWeight: 700, color: colors.success, marginBottom: 8 }}>
+                {lang === "ko" ? "✓ Stage 1 통과 (4명)" : "✓ Stage 1 Qualified (4)"}
+              </h4>
+              <div style={{ fontSize: 13, color: colors.gray800, lineHeight: 1.8 }}>
+                {americanoData.autoQualified.map((p, i) => (
+                  <span key={p.id}>
+                    {i > 0 && <span style={{ color: colors.gray400 }}> · </span>}
+                    <strong>{p.name}</strong>
+                  </span>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* 선발전 complete: 최종 8명 생존자 */}
+          {isSelection && phase === "complete" && americanoData.survivors && (
+            <Card style={{ marginBottom: 16, background: "#FEF3C7", border: `2px solid #F59E0B` }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: "#92400E", marginBottom: 10 }}>
+                🏆 {lang === "ko" ? "최종 선발 생존자 (8명)" : "Final Survivors (8)"}
+              </h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {americanoData.survivors.map((p, i) => (
+                  <div key={p.id} style={{ padding: "8px 10px", background: colors.white, borderRadius: 6, fontSize: 13 }}>
+                    <span style={{ fontWeight: 700, color: "#92400E", marginRight: 6 }}>{i + 1}.</span>
+                    <span style={{ fontWeight: 600 }}>{p.name}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           {/* 그룹들 */}
-          {activeGroups.map((g, gi) => renderAmericanoGroup(g, gi, phase))}
+          {activeGroups.map((g, gi) => isSelection ? renderSelectionGroup(g, gi) : renderAmericanoGroup(g, gi, phase))}
 
           {/* 관리자: 단계 전환 / 종료 */}
           {isAdmin && tournament.stage === "ongoing" && (
             <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "center" }}>
-              {phase === "group" && (
+              {!isSelection && phase === "group" && (
                 <Btn onClick={doAdvanceToFinal} disabled={!allGroupsDone}>
                   {lang === "ko" ? "결승 라운드로 →" : "Advance to Finals →"}
+                </Btn>
+              )}
+              {isSelection && phase === "stage1" && (
+                <Btn onClick={doAdvanceSelectionStage2} disabled={!allGroupsDone}>
+                  {lang === "ko" ? "Stage 2로 →" : "To Stage 2 →"}
+                </Btn>
+              )}
+              {isSelection && phase === "stage2" && (
+                <Btn onClick={doFinalizeSelection} disabled={!allGroupsDone}>
+                  {lang === "ko" ? "선발 확정 →" : "Finalize Selection →"}
                 </Btn>
               )}
               <Btn variant="danger" onClick={finishAmericano}>
