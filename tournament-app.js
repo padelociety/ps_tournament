@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.1";
+const APP_VERSION = "5.2";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -29,7 +29,22 @@ const translations = {
     americanoNormal: "아메리카노",
     americanoMexicano: "멕시카노",
     americanoTeam: "팀 아메리카노",
-    americanoSelection: "선발전 (12명)",
+    special: "스페셜",
+    specialFormat: "스페셜 포맷",
+    specialDesc: "특이 포맷 토너먼트 (선발전 등)",
+    specialName: "특이사항 이름",
+    specialNamePlaceholder: "예) 선발전",
+    specialNameHint: "비워두면 '스페셜'로 표시됩니다",
+    specialSel5: "5인 선발전",
+    specialSel10: "10인 선발전",
+    specialSel12: "12인 선발전",
+    specialSel5Desc: "5명 · 모든 페어 조합 15경기 · 4명 통과",
+    specialSel10Desc: "10명 · 2조 5명씩 · 조별 15경기",
+    specialSel12Desc: "12명 · 3조 4명씩 · 2단계 선발",
+    specialEliminate: "탈락 인원 (조당)",
+    specialEliminate1: "1명 (5위)",
+    specialEliminate2: "2명 (4·5위 → 추가 라운드)",
+    specialFinalRound: "추가 라운드 (탈락자 4명)",
     roundRobinGames: "라운드로빈 게임 수",
     knockoutFormat: "녹아웃 스테이지 포맷",
     set3: "3세트",
@@ -236,7 +251,22 @@ const translations = {
     americanoNormal: "Americano",
     americanoMexicano: "Mexicano",
     americanoTeam: "Team Americano",
-    americanoSelection: "Selection (12P)",
+    special: "Special",
+    specialFormat: "Special Format",
+    specialDesc: "Custom format (selection rounds, etc.)",
+    specialName: "Special Label",
+    specialNamePlaceholder: "e.g. Selection",
+    specialNameHint: "Defaults to 'Special' if empty",
+    specialSel5: "5-Player Selection",
+    specialSel10: "10-Player Selection",
+    specialSel12: "12-Player Selection",
+    specialSel5Desc: "5 players · all 15 pair combos · top 4 advance",
+    specialSel10Desc: "10 players · 2 groups of 5 · 15 games each",
+    specialSel12Desc: "12 players · 3 groups of 4 · 2-stage selection",
+    specialEliminate: "Eliminate per group",
+    specialEliminate1: "1 (only 5th)",
+    specialEliminate2: "2 (4th + 5th → final round)",
+    specialFinalRound: "Final round (4 eliminated players)",
     roundRobinGames: "Round Robin Games",
     knockoutFormat: "Knockout Stage Format",
     set3: "3 Sets",
@@ -1290,6 +1320,150 @@ function finalizeSelection(americanoData) {
 }
 
 // ============================================================
+// SPECIAL TOURNAMENT FORMATS (스페셜)
+// ============================================================
+// Helper: 4명 → 모든 페어 조합 (3 매치)
+function _allPairings4(players4) {
+  const pairings = [
+    [[0, 1], [2, 3]],
+    [[0, 2], [1, 3]],
+    [[0, 3], [1, 2]],
+  ];
+  return pairings.map(([t1, t2]) => ({
+    id: generateId(),
+    team1: [players4[t1[0]].id, players4[t1[1]].id],
+    team2: [players4[t2[0]].id, players4[t2[1]].id],
+    team1Score: null, team2Score: null, completed: false,
+  }));
+}
+
+// 5명 → 모든 페어 조합 15경기 (5라운드 × 3경기, 라운드마다 한 명 휴식)
+function _generateRoundsForFive(players5) {
+  const rounds = [];
+  for (let sitOut = 0; sitOut < 5; sitOut++) {
+    const active = players5.filter((_, i) => i !== sitOut);
+    rounds.push(_allPairings4(active));
+  }
+  return rounds;
+}
+
+// 5인 선발전: 단일 그룹, 4명 통과
+function generateSelection5(players) {
+  if (players.length !== 5) throw new Error("Selection-5 requires exactly 5 players");
+  return {
+    format: "selection-5",
+    phase: "stage1",
+    players,
+    groups: [{ name: "1", players, rounds: _generateRoundsForFive(players) }],
+    finalGroup: null,
+    autoQualified: null,
+    survivors: null,
+  };
+}
+
+function finalizeSelection5(specialData) {
+  const st = calcAmericanoStandings(specialData.groups[0].players, specialData.groups[0].rounds);
+  return {
+    ...specialData,
+    phase: "complete",
+    survivors: st.slice(0, 4).map(s => s.player),
+  };
+}
+
+// 10인 선발전: 2조 5명씩, 각 조 15경기
+// eliminateCount=1: 각 조 4명 통과 → 8명 생존, 추가 라운드 없음
+// eliminateCount=2: 각 조 3명 자동 통과 → 4·5위 4명 모아 추가 라운드 → 상위 2명 추가 통과 → 8명 생존
+function generateSelection10(players, useSeeds = false, eliminateCount = 1) {
+  if (players.length !== 10) throw new Error("Selection-10 requires exactly 10 players");
+  let ordered;
+  if (useSeeds) {
+    const seeded = players.filter((p) => p.seed).sort((a, b) => a.seed - b.seed);
+    const unseeded = players.filter((p) => !p.seed).sort(() => Math.random() - 0.5);
+    ordered = [...seeded, ...unseeded];
+  } else {
+    ordered = [...players].sort(() => Math.random() - 0.5);
+  }
+
+  // 스네이크 시딩으로 2조 배분
+  const groupA = [];
+  const groupB = [];
+  ordered.forEach((p, i) => {
+    const row = Math.floor(i / 2);
+    const col = i % 2;
+    const idx = row % 2 === 0 ? col : (1 - col);
+    (idx === 0 ? groupA : groupB).push(p);
+  });
+
+  return {
+    format: "selection-10",
+    phase: "stage1",
+    eliminateCount,
+    players,
+    groups: [
+      { name: "A", players: groupA, rounds: _generateRoundsForFive(groupA) },
+      { name: "B", players: groupB, rounds: _generateRoundsForFive(groupB) },
+    ],
+    finalGroup: null,
+    autoQualified: null,
+    survivors: null,
+  };
+}
+
+// 10인 선발전 stage1 완료 → 다음 단계
+// eliminateCount=1: 바로 complete (각 조 1-4위 = 8명 생존)
+// eliminateCount=2: 각 조 4-5위 4명으로 finalGroup 생성 → phase=stage2
+function advanceSelection10(specialData) {
+  const standings = specialData.groups.map(g => calcAmericanoStandings(g.players, g.rounds));
+  if (specialData.eliminateCount === 1) {
+    const survivors = [];
+    standings.forEach(st => st.slice(0, 4).forEach(s => survivors.push(s.player)));
+    return { ...specialData, phase: "complete", survivors };
+  }
+  // eliminateCount === 2
+  const autoQualified = [];
+  const eliminated = [];
+  standings.forEach(st => {
+    st.slice(0, 3).forEach(s => autoQualified.push(s.player));
+    st.slice(3, 5).forEach(s => eliminated.push(s.player));
+  });
+  // eliminated = 4명 → 4명 아메리카노 (3매치)
+  const finalGroup = {
+    name: "F",
+    players: eliminated,
+    rounds: [_allPairings4(eliminated)],
+  };
+  return {
+    ...specialData,
+    phase: "stage2",
+    autoQualified,
+    finalGroup,
+  };
+}
+
+// 10인 선발전 (eliminateCount=2) stage2 완료 → 추가 2명 생존 추가
+function finalizeSelection10(specialData) {
+  if (specialData.eliminateCount === 1) {
+    // 이미 complete 상태로 advanceSelection10에서 처리됨
+    return { ...specialData, phase: "complete" };
+  }
+  const st = calcAmericanoStandings(specialData.finalGroup.players, specialData.finalGroup.rounds);
+  const finalSurvivors = st.slice(0, 2).map(s => s.player);
+  return {
+    ...specialData,
+    phase: "complete",
+    survivors: [...specialData.autoQualified, ...finalSurvivors],
+  };
+}
+
+// 12인 선발전: 기존 advanceSelectionToStage2 / finalizeSelection 재사용 가능 (americanoData 형태와 동일)
+// generator만 specialData 형태로 래핑
+function generateSelection12(players, useSeeds = false) {
+  const data = generateAmericanoSelectionStage(players, useSeeds);
+  return { ...data, format: "selection-12" };
+}
+
+
+// ============================================================
 // ICONS (inline SVG)
 // ============================================================
 const Icon = ({ name, size = 20 }) => {
@@ -1609,7 +1783,31 @@ export default function App() {
             americanoData = { ...americanoData, survivors: americanoData.survivors.map((p) => p.name === oldName ? { ...p, name: newName } : p) }; changed = true;
           }
         }
-        return changed ? { ...t, registrations: regs, groups: updatedGroups || t.groups, knockoutBracket: updatedKnockout || t.knockoutBracket, americanoData } : t;
+        let specialData = t.specialData;
+        if (specialData) {
+          if (specialData.players) {
+            const sp = specialData.players.map((p) => p.name === oldName ? { ...p, name: newName } : p);
+            if (sp.some((p, i) => p !== specialData.players[i])) { specialData = { ...specialData, players: sp }; changed = true; }
+          }
+          if (specialData.groups) {
+            const gs = specialData.groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
+            specialData = { ...specialData, groups: gs }; changed = true;
+          }
+          if (specialData.stage2Groups) {
+            const sg = specialData.stage2Groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) }));
+            specialData = { ...specialData, stage2Groups: sg }; changed = true;
+          }
+          if (specialData.finalGroup) {
+            specialData = { ...specialData, finalGroup: { ...specialData.finalGroup, players: specialData.finalGroup.players.map((p) => p.name === oldName ? { ...p, name: newName } : p) } }; changed = true;
+          }
+          if (specialData.autoQualified) {
+            specialData = { ...specialData, autoQualified: specialData.autoQualified.map((p) => p.name === oldName ? { ...p, name: newName } : p) }; changed = true;
+          }
+          if (specialData.survivors) {
+            specialData = { ...specialData, survivors: specialData.survivors.map((p) => p.name === oldName ? { ...p, name: newName } : p) }; changed = true;
+          }
+        }
+        return changed ? { ...t, registrations: regs, groups: updatedGroups || t.groups, knockoutBracket: updatedKnockout || t.knockoutBracket, americanoData, specialData } : t;
       }));
       // 랭킹 업데이트
       updateAndSaveRankings((prev) => prev.map((r) => r.playerName === oldName ? { ...r, playerName: newName } : r));
@@ -2048,7 +2246,7 @@ function Card({ children, style: extraStyle, onClick }) {
 // TOURNAMENT LIST (Public View)
 // ============================================================
 function TournamentList({ tournaments, onSelect, T, lang }) {
-  const typeColors = { open: "#3b82f6", cup: "#ef4444", league: "#22c55e", americano: "#f59e0b" };
+  const typeColors = { open: "#3b82f6", cup: "#ef4444", league: "#22c55e", americano: "#f59e0b", special: "#8b5cf6" };
 
   if (tournaments.length === 0) {
     return (
@@ -2064,13 +2262,15 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
   const upcoming = tournaments.filter((t) => !t.date || new Date(t.date) >= now);
   const past = tournaments.filter((t) => t.date && new Date(t.date) < now);
 
+  const typeLabel = (t) => (t.type === "special" && t.specialName?.trim()) ? t.specialName.trim() : T(t.type);
+
   const renderCard = (t) => (
     <Card key={t.id} onClick={() => onSelect(t)} style={{ cursor: "pointer" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
         <div>
           <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
             <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: colors.white, backgroundColor: typeColors[t.type] }}>
-              {T(t.type)}
+              {typeLabel(t)}
             </span>
             {t.grade && (
               <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: colors.white, backgroundColor: GRADE_COLORS[t.grade] || colors.gray400 }}>
@@ -2101,7 +2301,11 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
       {t.location && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("location")}: {t.location}</p>}
       <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: colors.gray500 }}>
         <Icon name="users" size={16} />
-        <span>{t.registrations?.filter((r) => r.status === "confirmed").length || 0} / {t.type === "americano" ? (t.americanoPlayers || "?") : (t.maxTeams || "?")}</span>
+        <span>{t.registrations?.filter((r) => r.status === "confirmed").length || 0} / {
+          t.type === "americano" ? (t.americanoPlayers || "?")
+          : t.type === "special" ? (t.specialFormat === "selection-5" ? 5 : t.specialFormat === "selection-10" ? 10 : 12)
+          : (t.maxTeams || "?")
+        }</span>
         {t.entryFee && <span style={{ marginLeft: "auto", fontWeight: 600, color: colors.gray700 }}>{t.entryFee}</span>}
       </div>
     </Card>
@@ -2115,7 +2319,7 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
     }}>
       <div style={{ display: "flex", gap: 4 }}>
         <span style={{ padding: "2px 6px", borderRadius: 4, fontSize: 10, fontWeight: 700, color: colors.white, backgroundColor: typeColors[t.type] }}>
-          {T(t.type)}
+          {typeLabel(t)}
         </span>
         {t.grade && (
           <span style={{ padding: "2px 6px", borderRadius: 4, fontSize: 10, fontWeight: 700, color: colors.white, backgroundColor: GRADE_COLORS[t.grade] || colors.gray400 }}>
@@ -2180,7 +2384,7 @@ function AdminPanel({ tournaments, onSelect, onCreate, onEdit, onDelete, onRecal
             <Card key={t.id} onClick={() => onSelect(t)} style={{ cursor: "pointer" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <Badge type="info">{T(t.type)}</Badge>
+                  <Badge type="info">{(t.type === "special" && t.specialName?.trim()) ? t.specialName.trim() : T(t.type)}</Badge>
                   <h3 style={{ fontSize: 16, fontWeight: 600, color: colors.gray800, margin: 0 }}>{t.name}</h3>
                 </div>
                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
@@ -2243,6 +2447,9 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
       americanoPlayers: "8",
       americanoRounds: "6",
       americanoPointsPerMatch: "32",
+      specialFormat: "selection-12",
+      specialEliminate: "1",
+      specialName: "",
       bankAccount: "",
       courts: "",
       thirdPlaceEnabled: true,
@@ -2267,7 +2474,7 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
 
         <FormField label={T("tournamentType")}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {["open", "cup", "league", "americano"].map((type) => (
+            {["open", "cup", "league", "americano", "special"].map((type) => (
               <button
                 key={type}
                 onClick={() => set("type", type)}
@@ -2441,14 +2648,11 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
         {form.type === "americano" && (
           <>
             <FormField label={T("americanoType")}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                {["normal", "mexicano", "team", "selection"].map((at) => (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                {["normal", "mexicano", "team"].map((at) => (
                   <button
                     key={at}
-                    onClick={() => {
-                      set("americanoType", at);
-                      if (at === "selection") set("americanoPlayers", "12");
-                    }}
+                    onClick={() => set("americanoType", at)}
                     style={{
                       padding: "10px", borderRadius: 8, fontWeight: 600, cursor: "pointer",
                       border: `2px solid ${form.americanoType === at ? colors.primary : colors.gray200}`,
@@ -2457,26 +2661,78 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
                       fontSize: 13,
                     }}
                   >
-                    {at === "normal" ? T("americanoNormal") : at === "mexicano" ? T("americanoMexicano") : at === "team" ? T("americanoTeam") : T("americanoSelection")}
+                    {at === "normal" ? T("americanoNormal") : at === "mexicano" ? T("americanoMexicano") : T("americanoTeam")}
                   </button>
                 ))}
               </div>
             </FormField>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <FormField label={T("americanoPlayers")}>
-                <select value={form.americanoPlayers} onChange={(e) => {
-                  set("americanoPlayers", e.target.value);
-                }} style={inputStyle} disabled={form.americanoType === "selection"}>
-                  {form.americanoType === "selection"
-                    ? <option value="12">12</option>
-                    : Array.from({ length: 17 }, (_, i) => i + 4).map((n) => <option key={n} value={n}>{n}</option>)
-                  }
+                <select value={form.americanoPlayers} onChange={(e) => set("americanoPlayers", e.target.value)} style={inputStyle}>
+                  {Array.from({ length: 17 }, (_, i) => i + 4).map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </FormField>
               <FormField label={T("americanoPointsPerMatch")}>
                 <input type="number" value={form.americanoPointsPerMatch} onChange={(e) => set("americanoPointsPerMatch", e.target.value)} style={inputStyle} />
               </FormField>
             </div>
+          </>
+        )}
+
+        {form.type === "special" && (
+          <>
+            <FormField label={T("specialName")}>
+              <input
+                value={form.specialName || ""}
+                onChange={(e) => set("specialName", e.target.value)}
+                placeholder={T("specialNamePlaceholder")}
+                style={inputStyle}
+              />
+              <div style={{ fontSize: 11, color: colors.gray400, marginTop: 4 }}>{T("specialNameHint")}</div>
+            </FormField>
+            <FormField label={T("specialFormat")}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {[
+                  { val: "selection-5", labelKey: "specialSel5", descKey: "specialSel5Desc" },
+                  { val: "selection-10", labelKey: "specialSel10", descKey: "specialSel10Desc" },
+                  { val: "selection-12", labelKey: "specialSel12", descKey: "specialSel12Desc" },
+                ].map(({ val, labelKey, descKey }) => (
+                  <button
+                    key={val}
+                    onClick={() => set("specialFormat", val)}
+                    style={{
+                      padding: "10px 12px", borderRadius: 8, cursor: "pointer", textAlign: "left",
+                      border: `2px solid ${form.specialFormat === val ? colors.primary : colors.gray200}`,
+                      background: form.specialFormat === val ? colors.primaryLight : colors.white,
+                      color: form.specialFormat === val ? colors.primary : colors.gray700,
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{T(labelKey)}</div>
+                    <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2, color: colors.gray500 }}>{T(descKey)}</div>
+                  </button>
+                ))}
+              </div>
+            </FormField>
+            {form.specialFormat === "selection-10" && (
+              <FormField label={T("specialEliminate")}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {["1", "2"].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => set("specialEliminate", n)}
+                      style={{
+                        padding: "10px", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 13,
+                        border: `2px solid ${form.specialEliminate === n ? colors.primary : colors.gray200}`,
+                        background: form.specialEliminate === n ? colors.primaryLight : colors.white,
+                        color: form.specialEliminate === n ? colors.primary : colors.gray600,
+                      }}
+                    >
+                      {T("specialEliminate" + n)}
+                    </button>
+                  ))}
+                </div>
+              </FormField>
+            )}
           </>
         )}
 
@@ -2654,6 +2910,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
     cup: T("cupDesc"),
     league: T("leagueDesc"),
     americano: T("americanoDesc"),
+    special: T("specialDesc"),
   };
 
   // Generate bracket data for a set of teams given tournament type
@@ -2738,6 +2995,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
       groups: null,
       knockoutBracket: null,
       americanoData: null,
+      specialData: null,
     });
   };
 
@@ -2824,7 +3082,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: colors.gray800, margin: 0 }}>{tournament.name}</h2>
-            <Badge type="info">{T(tournament.type)}</Badge>
+            <Badge type="info">{(tournament.type === "special" && tournament.specialName?.trim()) ? tournament.specialName.trim() : T(tournament.type)}</Badge>
           </div>
           <p style={{ fontSize: 13, color: colors.gray500, marginTop: 4 }}>
             {typeDescMap[tournament.type]}
@@ -2901,7 +3159,11 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
               <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("entryFee")}</span>
               <span style={{ color: colors.gray800 }}>{tournament.entryFee || "-"}</span>
               <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("maxTeams")}</span>
-              <span style={{ color: colors.gray800 }}>{tournament.maxTeams || "-"}</span>
+              <span style={{ color: colors.gray800 }}>{
+                tournament.type === "americano" ? (tournament.americanoPlayers || "-")
+                : tournament.type === "special" ? (tournament.specialFormat === "selection-5" ? "5" : tournament.specialFormat === "selection-10" ? "10" : "12")
+                : (tournament.maxTeams || "-")
+              }</span>
               {tournament.type === "open" && (
                 <>
                   <span style={{ color: colors.gray500, fontWeight: 600, whiteSpace: "nowrap" }}>{T("roundRobinGames")}</span>
@@ -2949,7 +3211,11 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
             )}
             <div style={{ fontSize: 14, color: colors.gray600, marginBottom: 12 }}>
               <div>
-                {T("participants")}: <strong>{confirmedRegs.length}</strong> / {tournament.type === "americano" ? (tournament.americanoPlayers || "?") : (tournament.maxTeams || "?")}
+                {T("participants")}: <strong>{confirmedRegs.length}</strong> / {
+                  tournament.type === "americano" ? (tournament.americanoPlayers || "?")
+                  : tournament.type === "special" ? (tournament.specialFormat === "selection-5" ? 5 : tournament.specialFormat === "selection-10" ? 10 : 12)
+                  : (tournament.maxTeams || "?")
+                }
                 {pendingRegs.length > 0 && <span style={{ color: colors.warning }}> ({pendingRegs.length} {T("pendingPayment")})</span>}
               </div>
             </div>
@@ -3417,6 +3683,29 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
       }
     }
 
+    // 스페셜 데이터 동기화
+    let specialData = tournament.specialData;
+    if (specialData) {
+      if (specialData.players) {
+        specialData = { ...specialData, players: specialData.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) };
+      }
+      if (specialData.groups) {
+        specialData = { ...specialData, groups: specialData.groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) })) };
+      }
+      if (specialData.stage2Groups) {
+        specialData = { ...specialData, stage2Groups: specialData.stage2Groups.map((g) => ({ ...g, players: g.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) })) };
+      }
+      if (specialData.finalGroup) {
+        specialData = { ...specialData, finalGroup: { ...specialData.finalGroup, players: specialData.finalGroup.players.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) } };
+      }
+      if (specialData.autoQualified) {
+        specialData = { ...specialData, autoQualified: specialData.autoQualified.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) };
+      }
+      if (specialData.survivors) {
+        specialData = { ...specialData, survivors: specialData.survivors.map((p) => p.name === oldName ? { ...p, name: trimmed } : p) };
+      }
+    }
+
     // RR 그룹/녹아웃 대진표 동기화
     let updatedGroups = tournament.groups;
     if (updatedGroups?.length) {
@@ -3427,7 +3716,7 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
       updatedKnockout = { ...updatedKnockout, teams: updatedKnockout.teams.map((tm) => tm.name === oldName ? { ...tm, name: trimmed } : tm) };
     }
 
-    onUpdateTournament(tournament.id, { registrations: newRegs, americanoData, groups: updatedGroups || tournament.groups, knockoutBracket: updatedKnockout || tournament.knockoutBracket });
+    onUpdateTournament(tournament.id, { registrations: newRegs, americanoData, specialData, groups: updatedGroups || tournament.groups, knockoutBracket: updatedKnockout || tournament.knockoutBracket });
 
     // 랭킹 동기화
     if (onUpdateRankings) {
@@ -3573,6 +3862,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   const groups = tournament.groups || null;
   const knockoutBracket = tournament.knockoutBracket || null;
   const americanoData = tournament.americanoData || null;
+  const specialData = tournament.specialData || null;
 
   const getTeamName = (teamId) => {
     if (!teamId) return "TBD";
@@ -3580,6 +3870,10 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     if (reg) return reg.teamName || reg.playerName;
     if (americanoData?.players) {
       const p = americanoData.players.find((p) => p.id === teamId);
+      if (p) return p.name;
+    }
+    if (specialData?.players) {
+      const p = specialData.players.find((p) => p.id === teamId);
       if (p) return p.name;
     }
     if (groups) {
@@ -3797,6 +4091,110 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   // 대진표 초기화 (americanoData를 null로 → 생성 전 화면으로)
   const clearAmericanoBracket = () => {
     updateData({ americanoData: null });
+  };
+
+  // === SPECIAL (선발전) HANDLERS ===
+  const _requiredSpecialPlayers = (fmt) =>
+    fmt === "selection-5" ? 5 : fmt === "selection-10" ? 10 : 12;
+
+  const generateSpecialBracket = () => {
+    const confirmed = tournament.registrations?.filter((r) => r.status === "confirmed") || [];
+    const fmt = tournament.specialFormat || "selection-12";
+    const required = _requiredSpecialPlayers(fmt);
+    if (confirmed.length !== required) return;
+    const players = confirmed.map((r) => ({ id: r.id, name: r.playerName, seed: r.seed || null }));
+    const useSeeds = players.some((p) => p.seed);
+    let data;
+    if (fmt === "selection-5") {
+      data = generateSelection5(players);
+    } else if (fmt === "selection-10") {
+      const elimCount = parseInt(tournament.specialEliminate || "1");
+      data = generateSelection10(players, useSeeds, elimCount);
+    } else {
+      data = generateSelection12(players, useSeeds);
+    }
+    updateData({ specialData: data });
+  };
+
+  const clearSpecialBracket = () => {
+    updateData({ specialData: null });
+  };
+
+  const saveSpecialScore = (roundIdx, matchId, t1Score, t2Score, groupIdx, isFinalGroup) => {
+    const data = { ...specialData };
+    if (isFinalGroup) {
+      const fg = { ...data.finalGroup };
+      fg.rounds = fg.rounds.map((round, ri) =>
+        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(t1Score), team2Score: parseInt(t2Score), completed: true } : m) : round
+      );
+      data.finalGroup = fg;
+    } else if (data.format === "selection-12") {
+      // selection-12: stage1 = groups, stage2 = stage2Groups (americano-style)
+      const phase = data.phase === "stage2" ? "stage2Groups" : "groups";
+      const arr = [...data[phase]];
+      const g = { ...arr[groupIdx] };
+      g.rounds = g.rounds.map((round, ri) =>
+        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(t1Score), team2Score: parseInt(t2Score), completed: true } : m) : round
+      );
+      arr[groupIdx] = g;
+      data[phase] = arr;
+    } else {
+      // selection-5, selection-10: groups
+      const arr = [...data.groups];
+      const g = { ...arr[groupIdx] };
+      g.rounds = g.rounds.map((round, ri) =>
+        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(t1Score), team2Score: parseInt(t2Score), completed: true } : m) : round
+      );
+      arr[groupIdx] = g;
+      data.groups = arr;
+    }
+    updateData({ specialData: data });
+    setScoreModal(null);
+  };
+
+  const doAdvanceSpecial = () => {
+    if (!specialData) return;
+    let newData;
+    if (specialData.format === "selection-5") {
+      newData = finalizeSelection5(specialData);
+    } else if (specialData.format === "selection-10") {
+      newData = advanceSelection10(specialData);
+    } else {
+      // selection-12: reuse americano selection stage2 logic
+      newData = { ...advanceSelectionToStage2(specialData, lang), format: "selection-12" };
+    }
+    updateData({ specialData: newData });
+  };
+
+  const doFinalizeSpecial = () => {
+    if (!specialData) return;
+    let newData;
+    if (specialData.format === "selection-10") {
+      newData = finalizeSelection10(specialData);
+    } else if (specialData.format === "selection-12") {
+      newData = { ...finalizeSelection(specialData), format: "selection-12" };
+    } else {
+      return;
+    }
+    updateData({ specialData: newData });
+  };
+
+  const finishSpecial = () => {
+    onUpdateTournament(tournament.id, { stage: "completed" });
+  };
+
+  // selection-12 의 4인 조에서 다음 라운드 추가 (americano-style 파트너 로테이션)
+  const addSpecialNextRound = (groupIdx) => {
+    if (!specialData || specialData.format !== "selection-12") return;
+    const data = { ...specialData };
+    const phase = data.phase === "stage2" ? "stage2Groups" : "groups";
+    const arr = [...data[phase]];
+    const g = { ...arr[groupIdx] };
+    const nextRound = generateGroupNextRound(g, false);
+    g.rounds = [...g.rounds, nextRound];
+    arr[groupIdx] = g;
+    data[phase] = arr;
+    updateData({ specialData: data });
   };
 
   // 대진표 생성 (시드 반영)
@@ -4187,6 +4585,314 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
             awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
             isAmericano
             onSave={(s1, s2) => saveAmericanoScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2)}
+            onClose={() => setScoreModal(null)}
+            T={T}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ============================================================
+  // SPECIAL TOURNAMENT VIEW
+  // ============================================================
+  if (tournament.type === "special") {
+    const fmt = tournament.specialFormat || "selection-12";
+    const required = fmt === "selection-5" ? 5 : fmt === "selection-10" ? 10 : 12;
+
+    // 대진표 미생성 상태
+    if (!specialData) {
+      const confirmedRegs = tournament.registrations?.filter((r) => r.status === "confirmed") || [];
+      const confirmedCount = confirmedRegs.length;
+      const canGenerate = confirmedCount === required;
+
+      const setSpecialSeed = (regId, seedVal) => {
+        const newRegs = (tournament.registrations || []).map((r) => r.id === regId ? { ...r, seed: seedVal ? parseInt(seedVal) : null } : r);
+        updateData({ registrations: newRegs });
+      };
+      const hasSeeds = confirmedRegs.some((r) => r.seed);
+
+      return (
+        <div style={{ padding: "20px 0" }}>
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: colors.gray800, marginBottom: 8 }}>
+              {lang === "ko" ? "대진표를 생성해주세요" : "Generate the bracket"}
+            </h3>
+            <p style={{ fontSize: 14, color: colors.gray500 }}>
+              {T(fmt === "selection-5" ? "specialSel5" : fmt === "selection-10" ? "specialSel10" : "specialSel12")}
+              {" · "}
+              {lang === "ko" ? `확정 참가자: ${confirmedCount}/${required}명` : `Confirmed: ${confirmedCount}/${required}`}
+            </p>
+          </div>
+
+          {/* 시드 배정 (selection-10, selection-12 만; selection-5는 시드 무의미) */}
+          {isAdmin && fmt !== "selection-5" && confirmedCount >= 4 && (
+            <Card style={{ marginBottom: 16 }}>
+              <h4 style={{ fontSize: 14, fontWeight: 600, color: colors.gray600, marginBottom: 10 }}>
+                {lang === "ko" ? "시드 배정 (선택사항)" : "Seed Assignment (optional)"}
+              </h4>
+              <p style={{ fontSize: 12, color: colors.gray400, marginBottom: 12 }}>
+                {lang === "ko" ? "시드를 배정하면 스네이크 시딩으로 조가 균등하게 배분됩니다." : "Seeds distribute players evenly across groups via snake seeding."}
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {confirmedRegs.map((r, i) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", background: i % 2 === 0 ? colors.gray50 : "transparent", borderRadius: 6 }}>
+                    <select
+                      value={r.seed || ""}
+                      onChange={(e) => setSpecialSeed(r.id, e.target.value)}
+                      style={{ width: 52, padding: "4px", borderRadius: 6, border: `1px solid ${colors.gray300}`, fontSize: 12, textAlign: "center" }}
+                    >
+                      <option value="">-</option>
+                      {Array.from({ length: confirmedCount }, (_, k) => k + 1).map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: colors.gray800 }}>{r.playerName}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {isAdmin && tournament.stage === "ongoing" && (
+            <div style={{ textAlign: "center" }}>
+              <Btn onClick={generateSpecialBracket} disabled={!canGenerate}>
+                {lang === "ko" ? "대진표 생성" : "Generate Bracket"}
+                {hasSeeds && fmt !== "selection-5" && (lang === "ko" ? " (시드 적용)" : " (seeded)")}
+              </Btn>
+            </div>
+          )}
+          {!canGenerate && (
+            <p style={{ fontSize: 12, color: colors.warning, textAlign: "center", marginTop: 8 }}>
+              {lang === "ko" ? `정확히 ${required}명이 필요합니다 (현재 ${confirmedCount}명)` : `Exactly ${required} players required (currently ${confirmedCount})`}
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    // 대진표 생성 완료 — 포맷별 렌더
+    const phase = specialData.phase || "stage1";
+
+    // 그룹 렌더 헬퍼 (special 전용 — score 핸들러가 saveSpecialScore)
+    const renderSpecialGroup = (group, groupIdx, opts = {}) => {
+      const { promotionCount = 1, isFinalGroup = false, hideRank = false, allowNextRound = false } = opts;
+      const standings = calcAmericanoStandings(group.players, group.rounds);
+      const lastRound = group.rounds[group.rounds.length - 1];
+      const lastRoundDone = lastRound?.every((m) => m.completed);
+      return (
+        <Card key={group.name + (isFinalGroup ? "-F" : "")} style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: colors.primary }}>
+            {isFinalGroup
+              ? T("specialFinalRound")
+              : `${group.name}${phase === "stage1" || phase === "stage2" ? (lang === "ko" ? "조" : " Group") : ""}`}
+          </h3>
+
+          {!hideRank && (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${colors.gray200}` }}>
+                  <th style={{ padding: "6px 4px", textAlign: "left" }}>#</th>
+                  <th style={{ padding: "6px 4px", textAlign: "left" }}>{T("playerName")}</th>
+                  <th style={{ padding: "6px 4px", textAlign: "center" }}>{T("played")}</th>
+                  <th style={{ padding: "6px 4px", textAlign: "center" }}>{T("points")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {standings.map((s, i) => (
+                  <tr key={s.player.id} style={{
+                    borderBottom: `1px solid ${colors.gray100}`,
+                    background: i < promotionCount ? colors.successLight : "transparent",
+                  }}>
+                    <td style={{ padding: "6px 4px", fontWeight: 700 }}>{i + 1}</td>
+                    <td style={{ padding: "6px 4px" }}>{s.player.name}</td>
+                    <td style={{ padding: "6px 4px", textAlign: "center" }}>{s.played}</td>
+                    <td style={{ padding: "6px 4px", textAlign: "center", fontWeight: 700 }}>{s.points}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {group.rounds.map((round, ri) => {
+            const roundDone = round.every((m) => m.completed);
+            return (
+              <div key={ri} style={{ marginBottom: 8, padding: 10, background: colors.gray50, borderRadius: 8, opacity: roundDone && ri < group.rounds.length - 1 ? 0.6 : 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: roundDone ? colors.gray400 : colors.primary, marginBottom: 6 }}>
+                  {T("round")} {ri + 1} {roundDone ? "✓" : ""}
+                </div>
+                {round.map((m) => (
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${colors.gray100}` }}>
+                    <div style={{ flex: 1, fontSize: 13 }}>
+                      <span>{m.team1?.map((pid) => getTeamName(pid)).join(" & ")}</span>
+                      <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
+                      <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
+                    </div>
+                    {m.completed ? (
+                      <span style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8 }}>{m.team1Score} - {m.team2Score}</span>
+                    ) : isAdmin ? (
+                      <Btn size="sm" onClick={() => setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup })}>{T("enterScore")}</Btn>
+                    ) : (
+                      <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+
+          {/* selection-12: 다음 라운드 (4인 조 파트너 로테이션) */}
+          {allowNextRound && isAdmin && tournament.stage === "ongoing" && !isFinalGroup && (
+            <div style={{ marginTop: 8 }}>
+              <Btn size="sm" onClick={() => addSpecialNextRound(groupIdx)} disabled={!lastRoundDone}>
+                <Icon name="plus" size={14} />{lang === "ko" ? "다음 라운드" : "Next Round"}
+              </Btn>
+            </div>
+          )}
+        </Card>
+      );
+    };
+
+    // 활성 그룹 결정
+    let activeGroups = [];
+    let promotionCount = 1;
+    if (fmt === "selection-12") {
+      // selection-12: stage1 = groups (top1), stage2 = stage2Groups (top2)
+      activeGroups = phase === "stage2" ? (specialData.stage2Groups || []) : (specialData.groups || []);
+      promotionCount = phase === "stage2" ? 2 : 1;
+    } else if (fmt === "selection-10") {
+      // selection-10: stage1 = groups (top4 if elim=1, top3 if elim=2)
+      activeGroups = specialData.groups || [];
+      promotionCount = specialData.eliminateCount === 2 ? 3 : 4;
+    } else {
+      // selection-5: 단일 그룹 (top4 통과)
+      activeGroups = specialData.groups || [];
+      promotionCount = 4;
+    }
+
+    const allGroupsDone = activeGroups.length > 0 && activeGroups.every(g => g.rounds.length > 0 && g.rounds.every(r => r.every(m => m.completed)));
+    const finalGroupDone = specialData.finalGroup ? specialData.finalGroup.rounds.every(r => r.every(m => m.completed)) : false;
+
+    // 페이즈 라벨
+    let phaseLabel;
+    if (fmt === "selection-12") {
+      phaseLabel = phase === "stage1" ? (lang === "ko" ? "Stage 1 — 조별리그 (3조)" : "Stage 1 — Groups (3)")
+        : phase === "stage2" ? (lang === "ko" ? "Stage 2 — 생존전 (2조)" : "Stage 2 — Survival (2)")
+        : (lang === "ko" ? "선발 완료" : "Selection Complete");
+    } else if (fmt === "selection-10") {
+      phaseLabel = phase === "stage1" ? (lang === "ko" ? "Stage 1 — 조별리그 (2조)" : "Stage 1 — Groups (2)")
+        : phase === "stage2" ? T("specialFinalRound")
+        : (lang === "ko" ? "선발 완료" : "Selection Complete");
+    } else {
+      phaseLabel = phase === "complete"
+        ? (lang === "ko" ? "선발 완료" : "Selection Complete")
+        : (lang === "ko" ? "전체 조합전 (15경기)" : "All Pair Combinations (15)");
+    }
+
+    return (
+      <div>
+        {/* 페이즈 + 관리자 버튼 */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <Badge type={phase === "complete" ? "warning" : "info"}>{phaseLabel}</Badge>
+          {isAdmin && tournament.stage === "ongoing" && (
+            <div style={{ display: "flex", gap: 6 }}>
+              <Btn size="sm" variant="outline" onClick={generateSpecialBracket}>
+                {lang === "ko" ? "대진표 재설정" : "Reset Bracket"}
+              </Btn>
+              <Btn size="sm" variant="danger" onClick={clearSpecialBracket}>
+                {lang === "ko" ? "대진표 초기화" : "Clear Bracket"}
+              </Btn>
+            </div>
+          )}
+        </div>
+
+        {/* 자동통과자 카드 (selection-10 elim=2 stage2, selection-12 stage2/complete) */}
+        {specialData.autoQualified && (phase === "stage2" || phase === "complete") && (
+          <Card style={{ marginBottom: 16, background: colors.successLight, border: `1px solid ${colors.success}` }}>
+            <h4 style={{ fontSize: 14, fontWeight: 700, color: colors.success, marginBottom: 8 }}>
+              {lang === "ko" ? `✓ 자동 통과 (${specialData.autoQualified.length}명)` : `✓ Auto-Qualified (${specialData.autoQualified.length})`}
+            </h4>
+            <div style={{ fontSize: 13, color: colors.gray800, lineHeight: 1.8 }}>
+              {specialData.autoQualified.map((p, i) => (
+                <span key={p.id}>
+                  {i > 0 && <span style={{ color: colors.gray400 }}> · </span>}
+                  <strong>{p.name}</strong>
+                </span>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* 최종 생존자 카드 */}
+        {phase === "complete" && specialData.survivors && (
+          <Card style={{ marginBottom: 16, background: "#FEF3C7", border: `2px solid #F59E0B` }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: "#92400E", marginBottom: 10 }}>
+              🏆 {lang === "ko" ? `최종 선발 생존자 (${specialData.survivors.length}명)` : `Final Survivors (${specialData.survivors.length})`}
+            </h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              {specialData.survivors.map((p, i) => (
+                <div key={p.id} style={{ padding: "8px 10px", background: colors.white, borderRadius: 6, fontSize: 13 }}>
+                  <span style={{ fontWeight: 700, color: "#92400E", marginRight: 6 }}>{i + 1}.</span>
+                  <span style={{ fontWeight: 600 }}>{p.name}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* 활성 그룹 */}
+        {activeGroups.map((g, gi) => renderSpecialGroup(g, gi, { promotionCount, allowNextRound: fmt === "selection-12" }))}
+
+        {/* finalGroup (selection-10 eliminateCount=2의 추가 라운드) */}
+        {specialData.finalGroup && (phase === "stage2" || phase === "complete") &&
+          renderSpecialGroup(specialData.finalGroup, 0, { promotionCount: 2, isFinalGroup: true })}
+
+        {/* 관리자 단계 전환 / 종료 버튼 */}
+        {isAdmin && tournament.stage === "ongoing" && (
+          <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "center", flexWrap: "wrap" }}>
+            {/* selection-5: stage1 완료 → 바로 finalize */}
+            {fmt === "selection-5" && phase === "stage1" && (
+              <Btn onClick={doAdvanceSpecial} disabled={!allGroupsDone}>
+                {lang === "ko" ? "선발 확정 →" : "Finalize Selection →"}
+              </Btn>
+            )}
+            {/* selection-10 stage1 → advance */}
+            {fmt === "selection-10" && phase === "stage1" && (
+              <Btn onClick={doAdvanceSpecial} disabled={!allGroupsDone}>
+                {specialData.eliminateCount === 2
+                  ? (lang === "ko" ? "추가 라운드 진행 →" : "To Final Round →")
+                  : (lang === "ko" ? "선발 확정 →" : "Finalize Selection →")}
+              </Btn>
+            )}
+            {/* selection-10 stage2 (eliminateCount=2) → finalize */}
+            {fmt === "selection-10" && phase === "stage2" && (
+              <Btn onClick={doFinalizeSpecial} disabled={!finalGroupDone}>
+                {lang === "ko" ? "선발 확정 →" : "Finalize Selection →"}
+              </Btn>
+            )}
+            {/* selection-12 stage1 → stage2 */}
+            {fmt === "selection-12" && phase === "stage1" && (
+              <Btn onClick={doAdvanceSpecial} disabled={!allGroupsDone}>
+                {lang === "ko" ? "Stage 2로 →" : "To Stage 2 →"}
+              </Btn>
+            )}
+            {/* selection-12 stage2 → finalize */}
+            {fmt === "selection-12" && phase === "stage2" && (
+              <Btn onClick={doFinalizeSpecial} disabled={!allGroupsDone}>
+                {lang === "ko" ? "선발 확정 →" : "Finalize Selection →"}
+              </Btn>
+            )}
+            <Btn variant="danger" onClick={finishSpecial}>
+              {lang === "ko" ? "대회 종료" : "End Tournament"}
+            </Btn>
+          </div>
+        )}
+
+        {scoreModal?.type === "special" && (
+          <ScoreModal
+            match={scoreModal.match}
+            homeName={scoreModal.match.team1?.map((pid) => getTeamName(pid)).join(" & ")}
+            awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
+            isAmericano
+            onSave={(s1, s2) => saveSpecialScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, scoreModal.groupIdx, scoreModal.isFinalGroup)}
             onClose={() => setScoreModal(null)}
             T={T}
           />
