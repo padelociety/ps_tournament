@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.2";
+const APP_VERSION = "5.3";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2280,9 +2280,17 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
           </div>
           <h3 style={{ fontSize: 18, fontWeight: 700, color: colors.gray800, margin: 0 }}>{t.name}</h3>
         </div>
-        <Badge type={t.stage === "registration" ? "info" : t.stage === "completed" ? "confirmed" : "pending"}>
-          {t.stage === "registration" ? T("registrationOpen") : t.stage === "completed" ? T("completed") : T("ongoing")}
-        </Badge>
+        {(() => {
+          const deadlinePassed = t.registrationDeadline && deadlineEndOfDay(t.registrationDeadline) < new Date();
+          const isClosed = deadlinePassed || t.registrationClosed;
+          const badgeType = t.stage === "completed" ? "confirmed"
+            : t.stage === "registration" ? (isClosed ? "danger" : "info")
+            : "pending";
+          const label = t.stage === "completed" ? T("completed")
+            : t.stage === "registration" ? (isClosed ? T("registrationClosed") : T("registrationOpen"))
+            : T("ongoing");
+          return <Badge type={badgeType}>{label}</Badge>;
+        })()}
       </div>
       {(t.categoryGender || t.categoryLevel) && (
         <div style={{ margin: "6px 0" }}>
@@ -2292,12 +2300,19 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
         </div>
       )}
       {t.date && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("date")}: {formatDate(t.date, lang)}{t.startTime ? ` ${t.startTime}` : ""}</p>}
-      {t.registrationDeadline && (
-        <p style={{ fontSize: 13, margin: "4px 0", color: deadlineEndOfDay(t.registrationDeadline) < new Date() ? colors.danger : colors.warning }}>
-          {T("registrationDeadline")}: {formatDate(t.registrationDeadline, lang)}
-          {(() => { const diff = Math.ceil((deadlineEndOfDay(t.registrationDeadline) - new Date()) / 86400000); return diff < 0 ? ` - ${T("deadlinePassed")}` : ` - ${diff}${T("daysLeft")}`; })()}
-        </p>
-      )}
+      {t.registrationDeadline && (() => {
+        const dl = deadlineEndOfDay(t.registrationDeadline);
+        const now = new Date();
+        const passed = dl < now;
+        return (
+          <p style={{ fontSize: 13, margin: "4px 0", color: passed ? colors.danger : colors.warning }}>
+            {T("registrationDeadline")}: {formatDate(t.registrationDeadline, lang)}
+            {passed
+              ? ` - ${T("deadlinePassed")}`
+              : ` - ${Math.max(1, Math.ceil((dl - now) / 86400000))}${T("daysLeft")}`}
+          </p>
+        );
+      })()}
       {t.location && <p style={{ fontSize: 13, color: colors.gray500, margin: "4px 0" }}>{T("location")}: {t.location}</p>}
       <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: colors.gray500 }}>
         <Icon name="users" size={16} />
