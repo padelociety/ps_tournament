@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.5";
+const APP_VERSION = "5.6";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -4342,7 +4342,11 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                     <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                   </div>
                   {m.completed ? (
-                    <span style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8 }}>{m.team1Score} - {m.team2Score}</span>
+                    <span
+                      style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
+                      onClick={() => isAdmin && setScoreModal({ type: "americano", roundIdx: ri, match: m, groupIdx })}
+                      title={isAdmin ? T("edit") : ""}
+                    >{m.team1Score} - {m.team2Score}</span>
                   ) : isAdmin ? (
                     <Btn size="sm" onClick={() => setScoreModal({ type: "americano", roundIdx: ri, match: m, groupIdx })}>{T("enterScore")}</Btn>
                   ) : (
@@ -4623,7 +4627,11 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                     <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                   </div>
                   {m.completed ? (
-                    <span style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8 }}>{m.team1Score} - {m.team2Score}</span>
+                    <span
+                      style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
+                      onClick={() => isAdmin && setScoreModal({ type: "americano", roundIdx: ri, match: m })}
+                      title={isAdmin ? T("edit") : ""}
+                    >{m.team1Score} - {m.team2Score}</span>
                   ) : isAdmin ? (
                     <Btn size="sm" onClick={() => setScoreModal({ type: "americano", roundIdx: ri, match: m })}>{T("enterScore")}</Btn>
                   ) : (
@@ -4795,7 +4803,11 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                       <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                     </div>
                     {m.completed ? (
-                      <span style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8 }}>{m.team1Score} - {m.team2Score}</span>
+                      <span
+                        style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
+                        onClick={() => isAdmin && setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup })}
+                        title={isAdmin ? T("edit") : ""}
+                      >{m.team1Score} - {m.team2Score}</span>
                     ) : isAdmin ? (
                       <Btn size="sm" onClick={() => setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup })}>{T("enterScore")}</Btn>
                     ) : (
@@ -4956,7 +4968,11 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                 <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
               </div>
               {m.completed ? (
-                <span style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8 }}>{m.team1Score} - {m.team2Score}</span>
+                <span
+                  style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
+                  onClick={() => isAdmin && setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup: false })}
+                  title={isAdmin ? T("edit") : ""}
+                >{m.team1Score} - {m.team2Score}</span>
               ) : isAdmin ? (
                 <Btn size="sm" onClick={() => setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup: false })}>{T("enterScore")}</Btn>
               ) : (
