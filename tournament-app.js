@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.6";
+const APP_VERSION = "5.7";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1650,35 +1650,44 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  // Firestore에서 데이터 로드 (앱 시작 시 1회)
+  // Firestore 실시간 구독 (다른 기기에서의 변경사항도 즉시 반영)
   const [dataLoaded, setDataLoaded] = useState(false);
-  useEffect(() => {
-    if (!window.db) { setDataLoaded(true); return; }
-    const load = async () => {
-      try {
-        const [fsT, fsP, fsR] = await Promise.all([
-          loadFromFirestore("tournaments"),
-          loadFromFirestore("players"),
-          loadFromFirestore("rankings")
-        ]);
-        if (fsT?.items?.length) setTournaments(fsT.items);
-        if (fsP?.items?.length) setPlayers(fsP.items);
-        if (fsR?.items?.length) setRankings(fsR.items);
-      } catch (e) {
-        console.error("Firestore load error:", e);
-      }
-      setDataLoaded(true);
-    };
-    load();
-  }, []);
-
-  // Firestore 저장 후 React 상태 업데이트 헬퍼
   const tournamentsRef = useRef(tournaments);
   tournamentsRef.current = tournaments;
   const playersRef = useRef(players);
   playersRef.current = players;
   const rankingsRef = useRef(rankings);
   rankingsRef.current = rankings;
+
+  useEffect(() => {
+    if (!window.db) { setDataLoaded(true); return; }
+    let firstSnapshotCount = 0;
+    const markLoaded = () => {
+      firstSnapshotCount += 1;
+      if (firstSnapshotCount >= 3) setDataLoaded(true);
+    };
+    const parseDoc = (doc) => {
+      if (!doc.exists) return [];
+      const raw = doc.data();
+      if (raw.data) {
+        try { return JSON.parse(raw.data); } catch { return []; }
+      }
+      return raw.items || [];
+    };
+    const unsubT = fsDb.collection(FS_COLLECTION).doc("tournaments").onSnapshot(
+      (doc) => { const items = parseDoc(doc); setTournaments(items); tournamentsRef.current = items; markLoaded(); },
+      (err) => { console.error("tournaments snapshot error:", err); markLoaded(); }
+    );
+    const unsubP = fsDb.collection(FS_COLLECTION).doc("players").onSnapshot(
+      (doc) => { const items = parseDoc(doc); setPlayers(items); playersRef.current = items; markLoaded(); },
+      (err) => { console.error("players snapshot error:", err); markLoaded(); }
+    );
+    const unsubR = fsDb.collection(FS_COLLECTION).doc("rankings").onSnapshot(
+      (doc) => { const items = parseDoc(doc); setRankings(items); rankingsRef.current = items; markLoaded(); },
+      (err) => { console.error("rankings snapshot error:", err); markLoaded(); }
+    );
+    return () => { unsubT(); unsubP(); unsubR(); };
+  }, []);
 
   const updateAndSaveTournaments = useCallback(async (updater) => {
     const next = typeof updater === "function" ? updater(tournamentsRef.current) : updater;
