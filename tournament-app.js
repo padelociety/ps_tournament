@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.3";
+const APP_VERSION = "5.4";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1339,10 +1339,28 @@ function _allPairings4(players4) {
 
 // 5명 → 모든 페어 조합 15경기 (5라운드 × 3경기, 라운드마다 한 명 휴식)
 function _generateRoundsForFive(players5) {
+  // 3 라운드 × 5 경기 = 총 15 경기 (모든 페어 조합)
+  // 매 라운드마다 5명 전원이 1번씩 sit-out → 경기마다 쉬는 사람이 바뀜
+  // 라운드마다 sit-out 순서는 랜덤 셔플
+  const pairings = [
+    [[0, 1], [2, 3]],
+    [[0, 2], [1, 3]],
+    [[0, 3], [1, 2]],
+  ];
   const rounds = [];
-  for (let sitOut = 0; sitOut < 5; sitOut++) {
-    const active = players5.filter((_, i) => i !== sitOut);
-    rounds.push(_allPairings4(active));
+  for (let r = 0; r < 3; r++) {
+    const [t1, t2] = pairings[r];
+    const sitOutOrder = [0, 1, 2, 3, 4].sort(() => Math.random() - 0.5);
+    const round = sitOutOrder.map((sitOut) => {
+      const active = players5.filter((_, i) => i !== sitOut);
+      return {
+        id: generateId(),
+        team1: [active[t1[0]].id, active[t1[1]].id],
+        team2: [active[t2[0]].id, active[t2[1]].id],
+        team1Score: null, team2Score: null, completed: false,
+      };
+    });
+    rounds.push(round);
   }
   return rounds;
 }
@@ -4799,7 +4817,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     } else {
       phaseLabel = phase === "complete"
         ? (lang === "ko" ? "선발 완료" : "Selection Complete")
-        : (lang === "ko" ? "전체 조합전 (15경기)" : "All Pair Combinations (15)");
+        : (lang === "ko" ? "전체 조합전 (3라운드 × 5경기)" : "All Combinations (3 × 5)");
     }
 
     return (
