@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.4";
+const APP_VERSION = "5.5";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -45,6 +45,11 @@ const translations = {
     specialEliminate1: "1명 (5위)",
     specialEliminate2: "2명 (4·5위 → 추가 라운드)",
     specialFinalRound: "추가 라운드 (탈락자 4명)",
+    specialParallel: "조 진행 방식",
+    specialParallelSeparate: "각자 진행",
+    specialParallelSeparateDesc: "A조 다 끝나고 → B조",
+    specialParallelTogether: "같이 진행",
+    specialParallelTogetherDesc: "A·B조 라운드별 병행",
     roundRobinGames: "라운드로빈 게임 수",
     knockoutFormat: "녹아웃 스테이지 포맷",
     set3: "3세트",
@@ -267,6 +272,11 @@ const translations = {
     specialEliminate1: "1 (only 5th)",
     specialEliminate2: "2 (4th + 5th → final round)",
     specialFinalRound: "Final round (4 eliminated players)",
+    specialParallel: "Group Schedule",
+    specialParallelSeparate: "Separate",
+    specialParallelSeparateDesc: "A finishes, then B",
+    specialParallelTogether: "Together",
+    specialParallelTogetherDesc: "A & B run in parallel by round",
     roundRobinGames: "Round Robin Games",
     knockoutFormat: "Knockout Stage Format",
     set3: "3 Sets",
@@ -2483,6 +2493,7 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
       specialFormat: "selection-12",
       specialEliminate: "1",
       specialName: "",
+      specialParallel: "separate",
       bankAccount: "",
       courts: "",
       thirdPlaceEnabled: true,
@@ -2747,24 +2758,48 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
               </div>
             </FormField>
             {form.specialFormat === "selection-10" && (
-              <FormField label={T("specialEliminate")}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {["1", "2"].map((n) => (
-                    <button
-                      key={n}
-                      onClick={() => set("specialEliminate", n)}
-                      style={{
-                        padding: "10px", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 13,
-                        border: `2px solid ${form.specialEliminate === n ? colors.primary : colors.gray200}`,
-                        background: form.specialEliminate === n ? colors.primaryLight : colors.white,
-                        color: form.specialEliminate === n ? colors.primary : colors.gray600,
-                      }}
-                    >
-                      {T("specialEliminate" + n)}
-                    </button>
-                  ))}
-                </div>
-              </FormField>
+              <>
+                <FormField label={T("specialEliminate")}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {["1", "2"].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => set("specialEliminate", n)}
+                        style={{
+                          padding: "10px", borderRadius: 8, fontWeight: 600, cursor: "pointer", fontSize: 13,
+                          border: `2px solid ${form.specialEliminate === n ? colors.primary : colors.gray200}`,
+                          background: form.specialEliminate === n ? colors.primaryLight : colors.white,
+                          color: form.specialEliminate === n ? colors.primary : colors.gray600,
+                        }}
+                      >
+                        {T("specialEliminate" + n)}
+                      </button>
+                    ))}
+                  </div>
+                </FormField>
+                <FormField label={T("specialParallel")}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {[
+                      { val: "separate", labelKey: "specialParallelSeparate", descKey: "specialParallelSeparateDesc" },
+                      { val: "together", labelKey: "specialParallelTogether", descKey: "specialParallelTogetherDesc" },
+                    ].map(({ val, labelKey, descKey }) => (
+                      <button
+                        key={val}
+                        onClick={() => set("specialParallel", val)}
+                        style={{
+                          padding: "10px 12px", borderRadius: 8, cursor: "pointer", textAlign: "left",
+                          border: `2px solid ${(form.specialParallel || "separate") === val ? colors.primary : colors.gray200}`,
+                          background: (form.specialParallel || "separate") === val ? colors.primaryLight : colors.white,
+                          color: (form.specialParallel || "separate") === val ? colors.primary : colors.gray700,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{T(labelKey)}</div>
+                        <div style={{ fontSize: 11, fontWeight: 400, marginTop: 2, color: colors.gray500 }}>{T(descKey)}</div>
+                      </button>
+                    ))}
+                  </div>
+                </FormField>
+              </>
             )}
           </>
         )}
@@ -4871,8 +4906,95 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
           </Card>
         )}
 
-        {/* 활성 그룹 */}
-        {activeGroups.map((g, gi) => renderSpecialGroup(g, gi, { promotionCount, allowNextRound: fmt === "selection-12" }))}
+        {/* 활성 그룹 — 10인 선발전에 '같이 진행' 옵션이면 병렬 렌더 */}
+        {(fmt === "selection-10" && tournament.specialParallel === "together" && phase === "stage1" && activeGroups.length === 2) ? (() => {
+          const [gA, gB] = activeGroups;
+          // 순위 카드 (각 조)
+          const standingsA = calcAmericanoStandings(gA.players, gA.rounds);
+          const standingsB = calcAmericanoStandings(gB.players, gB.rounds);
+          const numRounds = Math.max(gA.rounds.length, gB.rounds.length);
+          const renderStandingsMini = (group, standings) => (
+            <Card key={"st-" + group.name} style={{ marginBottom: 12 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: colors.primary }}>
+                {group.name}{lang === "ko" ? "조" : " Group"}
+              </h3>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: `2px solid ${colors.gray200}` }}>
+                    <th style={{ padding: "6px 4px", textAlign: "left" }}>#</th>
+                    <th style={{ padding: "6px 4px", textAlign: "left" }}>{T("playerName")}</th>
+                    <th style={{ padding: "6px 4px", textAlign: "center" }}>{T("played")}</th>
+                    <th style={{ padding: "6px 4px", textAlign: "center" }}>{T("points")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {standings.map((s, i) => (
+                    <tr key={s.player.id} style={{
+                      borderBottom: `1px solid ${colors.gray100}`,
+                      background: i < promotionCount ? colors.successLight : "transparent",
+                    }}>
+                      <td style={{ padding: "6px 4px", fontWeight: 700 }}>{i + 1}</td>
+                      <td style={{ padding: "6px 4px" }}>{s.player.name}</td>
+                      <td style={{ padding: "6px 4px", textAlign: "center" }}>{s.played}</td>
+                      <td style={{ padding: "6px 4px", textAlign: "center", fontWeight: 700 }}>{s.points}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          );
+          const renderMatchRow = (m, ri, groupIdx, groupLabel) => (
+            <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${colors.gray100}` }}>
+              <div style={{ flex: 1, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{
+                  flexShrink: 0, padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: 700,
+                  background: groupIdx === 0 ? colors.primaryLight : "#fef3c7",
+                  color: groupIdx === 0 ? colors.primary : "#92400e",
+                }}>{groupLabel}</span>
+                <span>{m.team1?.map((pid) => getTeamName(pid)).join(" & ")}</span>
+                <span style={{ color: colors.gray400, margin: "0 4px" }}>vs</span>
+                <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
+              </div>
+              {m.completed ? (
+                <span style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8 }}>{m.team1Score} - {m.team2Score}</span>
+              ) : isAdmin ? (
+                <Btn size="sm" onClick={() => setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup: false })}>{T("enterScore")}</Btn>
+              ) : (
+                <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
+              )}
+            </div>
+          );
+          return (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {renderStandingsMini(gA, standingsA)}
+                {renderStandingsMini(gB, standingsB)}
+              </div>
+              {Array.from({ length: numRounds }, (_, ri) => {
+                const aMatches = gA.rounds[ri] || [];
+                const bMatches = gB.rounds[ri] || [];
+                const allDone = [...aMatches, ...bMatches].every((m) => m.completed);
+                // 경기 인터리브: A.m1, B.m1, A.m2, B.m2, ...
+                const maxLen = Math.max(aMatches.length, bMatches.length);
+                const interleaved = [];
+                for (let k = 0; k < maxLen; k++) {
+                  if (aMatches[k]) interleaved.push({ match: aMatches[k], groupIdx: 0, groupLabel: gA.name });
+                  if (bMatches[k]) interleaved.push({ match: bMatches[k], groupIdx: 1, groupLabel: gB.name });
+                }
+                return (
+                  <Card key={"r-" + ri} style={{ marginBottom: 12, opacity: allDone && ri < numRounds - 1 ? 0.6 : 1 }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, color: allDone ? colors.gray400 : colors.primary }}>
+                      {T("round")} {ri + 1} {allDone ? "✓" : ""}
+                    </h4>
+                    {interleaved.map(({ match, groupIdx, groupLabel }) => renderMatchRow(match, ri, groupIdx, groupLabel))}
+                  </Card>
+                );
+              })}
+            </>
+          );
+        })() : (
+          activeGroups.map((g, gi) => renderSpecialGroup(g, gi, { promotionCount, allowNextRound: fmt === "selection-12" }))
+        )}
 
         {/* finalGroup (selection-10 eliminateCount=2의 추가 라운드) */}
         {specialData.finalGroup && (phase === "stage2" || phase === "complete") &&
