@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.7";
+const APP_VERSION = "5.8";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1205,13 +1205,10 @@ function generateAmericanoSelectionStage(players, useSeeds = false) {
     ordered = [...players].sort(() => Math.random() - 0.5);
   }
 
-  // 스네이크 시딩으로 3조 배분
+  // 단순 교차 분배: 시드 1,4,7,10 → A / 2,5,8,11 → B / 3,6,9,12 → C
   const groupBuckets = Array.from({ length: numGroups }, () => []);
   ordered.forEach((p, i) => {
-    const row = Math.floor(i / numGroups);
-    const col = i % numGroups;
-    const gi = row % 2 === 0 ? col : (numGroups - 1 - col);
-    groupBuckets[gi].push(p);
+    groupBuckets[i % numGroups].push(p);
   });
 
   const groups = [];
@@ -1412,14 +1409,11 @@ function generateSelection10(players, useSeeds = false, eliminateCount = 1) {
     ordered = [...players].sort(() => Math.random() - 0.5);
   }
 
-  // 스네이크 시딩으로 2조 배분
+  // 단순 교차 분배: 시드 1,3,5,7,9 → A / 2,4,6,8,10 → B
   const groupA = [];
   const groupB = [];
   ordered.forEach((p, i) => {
-    const row = Math.floor(i / 2);
-    const col = i % 2;
-    const idx = row % 2 === 0 ? col : (1 - col);
-    (idx === 0 ? groupA : groupB).push(p);
+    (i % 2 === 0 ? groupA : groupB).push(p);
   });
 
   return {
