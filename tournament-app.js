@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.8";
+const APP_VERSION = "5.9";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1051,26 +1051,36 @@ function generateAmericanoRounds(players, numRounds, isTeam = false, isMexicano 
 function calcAmericanoStandings(players, rounds) {
   const stats = {};
   players.forEach((p) => {
-    stats[p.id] = { player: p, points: 0, played: 0 };
+    stats[p.id] = { player: p, points: 0, played: 0, wins: 0, losses: 0 };
   });
   rounds.forEach((round) =>
     round.forEach((m) => {
       if (!m.completed) return;
+      const t1Win = (m.team1Score || 0) > (m.team2Score || 0);
+      const t2Win = (m.team2Score || 0) > (m.team1Score || 0);
       m.team1.forEach((pid) => {
         if (stats[pid]) {
           stats[pid].points += m.team1Score || 0;
           stats[pid].played++;
+          if (t1Win) stats[pid].wins++;
+          else if (t2Win) stats[pid].losses++;
         }
       });
       m.team2.forEach((pid) => {
         if (stats[pid]) {
           stats[pid].points += m.team2Score || 0;
           stats[pid].played++;
+          if (t2Win) stats[pid].wins++;
+          else if (t1Win) stats[pid].losses++;
         }
       });
     })
   );
-  return Object.values(stats).sort((a, b) => b.points - a.points);
+  // 정렬: 포인트 우선, 동점이면 승수, 그래도 동점이면 승률
+  return Object.values(stats).sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    return b.wins - a.wins;
+  });
 }
 
 // 아메리카노 그룹 스테이지 생성 (8명 이상: 4명씩 그룹)
@@ -4772,6 +4782,8 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                   <th style={{ padding: "6px 4px", textAlign: "left" }}>#</th>
                   <th style={{ padding: "6px 4px", textAlign: "left" }}>{T("playerName")}</th>
                   <th style={{ padding: "6px 4px", textAlign: "center" }}>{T("played")}</th>
+                  {isFinalGroup && <th style={{ padding: "6px 4px", textAlign: "center" }}>{lang === "ko" ? "승" : "W"}</th>}
+                  {isFinalGroup && <th style={{ padding: "6px 4px", textAlign: "center" }}>{lang === "ko" ? "패" : "L"}</th>}
                   <th style={{ padding: "6px 4px", textAlign: "center" }}>{T("points")}</th>
                 </tr>
               </thead>
@@ -4784,6 +4796,8 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                     <td style={{ padding: "6px 4px", fontWeight: 700 }}>{i + 1}</td>
                     <td style={{ padding: "6px 4px" }}>{s.player.name}</td>
                     <td style={{ padding: "6px 4px", textAlign: "center" }}>{s.played}</td>
+                    {isFinalGroup && <td style={{ padding: "6px 4px", textAlign: "center", color: colors.success, fontWeight: 600 }}>{s.wins}</td>}
+                    {isFinalGroup && <td style={{ padding: "6px 4px", textAlign: "center", color: colors.danger }}>{s.losses}</td>}
                     <td style={{ padding: "6px 4px", textAlign: "center", fontWeight: 700 }}>{s.points}</td>
                   </tr>
                 ))}
