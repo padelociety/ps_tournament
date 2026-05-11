@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.0";
+const APP_VERSION = "6.1";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1688,6 +1688,7 @@ export default function App() {
   useEffect(() => {
     if (!window.db) { setDataLoaded(true); return; }
     let firstSnapshotCount = 0;
+    let unsubs = [];
     const markLoaded = () => {
       firstSnapshotCount += 1;
       if (firstSnapshotCount >= 3) setDataLoaded(true);
@@ -1700,19 +1701,28 @@ export default function App() {
       }
       return raw.items || [];
     };
-    const unsubT = fsDb.collection(FS_COLLECTION).doc("tournaments").onSnapshot(
-      (doc) => { const items = parseDoc(doc); setTournaments(items); tournamentsRef.current = items; markLoaded(); },
-      (err) => { console.error("tournaments snapshot error:", err); markLoaded(); }
-    );
-    const unsubP = fsDb.collection(FS_COLLECTION).doc("players").onSnapshot(
-      (doc) => { const items = parseDoc(doc); setPlayers(items); playersRef.current = items; markLoaded(); },
-      (err) => { console.error("players snapshot error:", err); markLoaded(); }
-    );
-    const unsubR = fsDb.collection(FS_COLLECTION).doc("rankings").onSnapshot(
-      (doc) => { const items = parseDoc(doc); setRankings(items); rankingsRef.current = items; markLoaded(); },
-      (err) => { console.error("rankings snapshot error:", err); markLoaded(); }
-    );
-    return () => { unsubT(); unsubP(); unsubR(); };
+    // 익명 인증 완료 후 Firestore 구독 시작
+    const start = () => {
+      const unsubT = fsDb.collection(FS_COLLECTION).doc("tournaments").onSnapshot(
+        (doc) => { const items = parseDoc(doc); setTournaments(items); tournamentsRef.current = items; markLoaded(); },
+        (err) => { console.error("tournaments snapshot error:", err); markLoaded(); }
+      );
+      const unsubP = fsDb.collection(FS_COLLECTION).doc("players").onSnapshot(
+        (doc) => { const items = parseDoc(doc); setPlayers(items); playersRef.current = items; markLoaded(); },
+        (err) => { console.error("players snapshot error:", err); markLoaded(); }
+      );
+      const unsubR = fsDb.collection(FS_COLLECTION).doc("rankings").onSnapshot(
+        (doc) => { const items = parseDoc(doc); setRankings(items); rankingsRef.current = items; markLoaded(); },
+        (err) => { console.error("rankings snapshot error:", err); markLoaded(); }
+      );
+      unsubs = [unsubT, unsubP, unsubR];
+    };
+    if (window.authReady) {
+      window.authReady.finally(start);
+    } else {
+      start();
+    }
+    return () => { unsubs.forEach((u) => u && u()); };
   }, []);
 
   const updateAndSaveTournaments = useCallback(async (updater) => {
