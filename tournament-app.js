@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "5.9";
+const APP_VERSION = "6.0";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -1573,6 +1573,25 @@ const loadAdminPasswordHash = async () => {
   } catch { return null; }
 };
 
+// 비밀번호 분실 시 사용하는 마스터 복구 코드
+const ADMIN_RECOVERY_CODE = "padelociety-reset-2025";
+const resetAdminPasswordWithRecoveryCode = async (recoveryCode, newPassword) => {
+  if (recoveryCode !== ADMIN_RECOVERY_CODE) {
+    return { ok: false, error: "복구 코드가 일치하지 않습니다" };
+  }
+  if (!newPassword || newPassword.length < 4) {
+    return { ok: false, error: "새 비밀번호는 4자 이상" };
+  }
+  try {
+    if (!fsDb) return { ok: false, error: "DB 연결 안됨" };
+    const newHash = await hashPassword(newPassword);
+    await fsDb.collection(FS_COLLECTION).doc("config").set({ passwordHash: newHash }, { merge: true });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+};
+
 const colors = {
   primary: "#104734",
   primaryDark: "#0b3325",
@@ -1608,6 +1627,9 @@ export default function App() {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [showAdminPasswordModal, setShowAdminPasswordModal] = useState(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
+  const [resetMode, setResetMode] = useState(false);
+  const [resetRecoveryCode, setResetRecoveryCode] = useState("");
+  const [resetNewPassword, setResetNewPassword] = useState("");
   const [pendingAdminPage, setPendingAdminPage] = useState("admin");
   const [toastMessage, setToastMessage] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -1750,6 +1772,21 @@ export default function App() {
     } else {
       setToastMessage(T("wrongPassword"));
       setTimeout(() => setToastMessage(""), 2000);
+    }
+  };
+
+  // 비밀번호 재설정 (복구 코드 사용)
+  const tryResetAdminPassword = async () => {
+    const result = await resetAdminPasswordWithRecoveryCode(resetRecoveryCode, resetNewPassword);
+    if (result.ok) {
+      setToastMessage("비밀번호 재설정 완료. 새 비밀번호로 로그인하세요.");
+      setTimeout(() => setToastMessage(""), 3000);
+      setResetMode(false);
+      setResetRecoveryCode("");
+      setResetNewPassword("");
+    } else {
+      setToastMessage(result.error || "재설정 실패");
+      setTimeout(() => setToastMessage(""), 2500);
     }
   };
 
@@ -2123,24 +2160,84 @@ export default function App() {
         )}
         {/* Admin Password Modal */}
         {showAdminPasswordModal && (
-          <Modal onClose={() => { setShowAdminPasswordModal(false); setAdminPasswordInput(""); }}>
+          <Modal onClose={() => {
+            setShowAdminPasswordModal(false);
+            setAdminPasswordInput("");
+            setResetMode(false);
+            setResetRecoveryCode("");
+            setResetNewPassword("");
+          }}>
             <div style={{ padding: 24 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>{T("adminPassword")}</h2>
-              <FormField label={T("enterPassword")}>
-                <input
-                  type="password"
-                  value={adminPasswordInput}
-                  onChange={(e) => setAdminPasswordInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") tryAdminLogin(); }}
-                  style={inputStyle}
-                  autoFocus
-                  placeholder="****"
-                />
-              </FormField>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-                <Btn variant="outline" onClick={() => { setShowAdminPasswordModal(false); setAdminPasswordInput(""); }}>{T("cancel")}</Btn>
-                <Btn onClick={tryAdminLogin}>{T("login")}</Btn>
-              </div>
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>
+                {resetMode ? "비밀번호 재설정" : T("adminPassword")}
+              </h2>
+
+              {!resetMode ? (
+                <>
+                  <FormField label={T("enterPassword")}>
+                    <input
+                      type="password"
+                      value={adminPasswordInput}
+                      onChange={(e) => setAdminPasswordInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") tryAdminLogin(); }}
+                      style={inputStyle}
+                      autoFocus
+                      placeholder="****"
+                    />
+                  </FormField>
+                  <div style={{ marginTop: 8, textAlign: "right" }}>
+                    <button
+                      onClick={() => setResetMode(true)}
+                      style={{ background: "transparent", border: "none", color: colors.primary, fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 4 }}
+                    >
+                      비밀번호 재설정
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+                    <Btn variant="outline" onClick={() => { setShowAdminPasswordModal(false); setAdminPasswordInput(""); }}>{T("cancel")}</Btn>
+                    <Btn onClick={tryAdminLogin}>{T("login")}</Btn>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p style={{ fontSize: 12, color: colors.gray500, marginBottom: 12, lineHeight: 1.5 }}>
+                    복구 코드와 새 비밀번호를 입력하세요. 복구 코드는 코드 소유자만 알 수 있습니다.
+                  </p>
+                  <FormField label="복구 코드">
+                    <input
+                      type="password"
+                      value={resetRecoveryCode}
+                      onChange={(e) => setResetRecoveryCode(e.target.value)}
+                      style={inputStyle}
+                      autoFocus
+                      placeholder="복구 코드"
+                    />
+                  </FormField>
+                  <div style={{ height: 12 }} />
+                  <FormField label="새 비밀번호 (4자 이상)">
+                    <input
+                      type="password"
+                      value={resetNewPassword}
+                      onChange={(e) => setResetNewPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") tryResetAdminPassword(); }}
+                      style={inputStyle}
+                      placeholder="****"
+                    />
+                  </FormField>
+                  <div style={{ marginTop: 8, textAlign: "right" }}>
+                    <button
+                      onClick={() => { setResetMode(false); setResetRecoveryCode(""); setResetNewPassword(""); }}
+                      style={{ background: "transparent", border: "none", color: colors.gray500, fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 4 }}
+                    >
+                      ← 로그인으로 돌아가기
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+                    <Btn variant="outline" onClick={() => { setShowAdminPasswordModal(false); setResetMode(false); setResetRecoveryCode(""); setResetNewPassword(""); }}>{T("cancel")}</Btn>
+                    <Btn onClick={tryResetAdminPassword}>재설정</Btn>
+                  </div>
+                </>
+              )}
             </div>
           </Modal>
         )}
