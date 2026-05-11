@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.1";
+const APP_VERSION = "6.2";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2395,6 +2395,7 @@ function Card({ children, style: extraStyle, onClick }) {
 // ============================================================
 function TournamentList({ tournaments, onSelect, T, lang }) {
   const typeColors = { open: "#3b82f6", cup: "#ef4444", league: "#22c55e", americano: "#f59e0b", special: "#8b5cf6" };
+  const [listTab, setListTab] = useState("active"); // "active" | "past"
 
   if (tournaments.length === 0) {
     return (
@@ -2407,8 +2408,12 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
 
   const now = new Date();
   now.setHours(0, 0, 0, 0);
-  const upcoming = tournaments.filter((t) => !t.date || new Date(t.date) >= now);
-  const past = tournaments.filter((t) => t.date && new Date(t.date) < now);
+  // 진행 중: 종료되지 않았고, (날짜 없음 OR 미래 날짜)
+  const upcoming = tournaments.filter((t) => t.stage !== "completed" && (!t.date || new Date(t.date) >= now));
+  // 지난: 종료됨 OR 날짜가 과거
+  const past = tournaments.filter((t) => t.stage === "completed" || (t.date && new Date(t.date) < now));
+  // 지난 토너먼트 정렬: 최신 날짜 먼저
+  past.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   const typeLabel = (t) => (t.type === "special" && t.specialName?.trim()) ? t.specialName.trim() : T(t.type);
 
@@ -2495,21 +2500,54 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
     </div>
   );
 
+  const tabBtnStyle = (active) => ({
+    padding: "10px 18px",
+    border: "none",
+    borderBottom: `3px solid ${active ? colors.primary : "transparent"}`,
+    background: "none",
+    color: active ? colors.primary : colors.gray500,
+    fontWeight: active ? 700 : 500,
+    cursor: "pointer",
+    fontSize: 14,
+    marginBottom: -2,
+  });
+
   return (
     <div>
-      <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.gray800, marginBottom: 20 }}>{T("tournaments")}</h2>
-      {upcoming.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
-          {upcoming.map(renderCard)}
-        </div>
+      <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.gray800, marginBottom: 16 }}>{T("tournaments")}</h2>
+
+      {/* 탭 */}
+      <div style={{ display: "flex", gap: 4, borderBottom: `2px solid ${colors.gray200}`, marginBottom: 20 }}>
+        <button onClick={() => setListTab("active")} style={tabBtnStyle(listTab === "active")}>
+          {lang === "ko" ? `진행 중 (${upcoming.length})` : `Active (${upcoming.length})`}
+        </button>
+        <button onClick={() => setListTab("past")} style={tabBtnStyle(listTab === "past")}>
+          {lang === "ko" ? `지난 토너먼트 (${past.length})` : `Past (${past.length})`}
+        </button>
+      </div>
+
+      {listTab === "active" && (
+        upcoming.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+            {upcoming.map(renderCard)}
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", padding: "60px 20px", color: colors.gray400 }}>
+            <p style={{ fontSize: 14 }}>{lang === "ko" ? "진행 중인 토너먼트가 없습니다." : "No active tournaments."}</p>
+          </div>
+        )
       )}
-      {past.length > 0 && (
-        <div style={{ marginTop: 32 }}>
-          <h3 style={{ fontSize: 18, fontWeight: 600, color: colors.gray500, marginBottom: 12 }}>{T("pastTournaments")}</h3>
+
+      {listTab === "past" && (
+        past.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {past.map(renderPastCard)}
           </div>
-        </div>
+        ) : (
+          <div style={{ textAlign: "center", padding: "60px 20px", color: colors.gray400 }}>
+            <p style={{ fontSize: 14 }}>{lang === "ko" ? "지난 토너먼트가 없습니다." : "No past tournaments."}</p>
+          </div>
+        )
       )}
     </div>
   );
@@ -2520,34 +2558,60 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
 // ============================================================
 function AdminPanel({ tournaments, onSelect, onCreate, onEdit, onDelete, onRecalcPoints, T, lang }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [adminTab, setAdminTab] = useState("active");
+
+  const active = tournaments.filter((t) => t.stage !== "completed");
+  const past = tournaments.filter((t) => t.stage === "completed");
+  active.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  past.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const visible = adminTab === "active" ? active : past;
+
+  const tabBtnStyle = (isActive) => ({
+    padding: "10px 18px",
+    border: "none",
+    borderBottom: `3px solid ${isActive ? colors.primary : "transparent"}`,
+    background: "none",
+    color: isActive ? colors.primary : colors.gray500,
+    fontWeight: isActive ? 700 : 500,
+    cursor: "pointer",
+    fontSize: 14,
+    marginBottom: -2,
+  });
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 style={{ fontSize: 24, fontWeight: 700, color: colors.gray800, margin: 0 }}>{T("admin")}</h2>
         <div style={{ display: "flex", gap: 8 }}>
           {onRecalcPoints && <Btn size="sm" variant="outline" onClick={onRecalcPoints}>{lang === "ko" ? "포인트 재계산" : "Recalculate Points"}</Btn>}
           <Btn onClick={onCreate}><Icon name="plus" size={16} />{T("createTournament")}</Btn>
         </div>
       </div>
-      {tournaments.length === 0 ? (
+
+      {/* 탭 */}
+      <div style={{ display: "flex", gap: 4, borderBottom: `2px solid ${colors.gray200}`, marginBottom: 20 }}>
+        <button onClick={() => setAdminTab("active")} style={tabBtnStyle(adminTab === "active")}>
+          {lang === "ko" ? `진행 중 (${active.length})` : `Active (${active.length})`}
+        </button>
+        <button onClick={() => setAdminTab("past")} style={tabBtnStyle(adminTab === "past")}>
+          {lang === "ko" ? `지난 토너먼트 (${past.length})` : `Past (${past.length})`}
+        </button>
+      </div>
+
+      {visible.length === 0 ? (
         <div style={{ textAlign: "center", padding: "60px 20px", color: colors.gray400 }}>
-          <p>{T("noTournaments")}</p>
+          <p>{adminTab === "active"
+            ? (lang === "ko" ? "진행 중인 토너먼트가 없습니다." : "No active tournaments.")
+            : (lang === "ko" ? "지난 토너먼트가 없습니다." : "No past tournaments.")}</p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {[...tournaments].sort((a, b) => {
-            // 완료된 대회는 밑으로
-            const aFinished = a.stage === "finished" ? 1 : 0;
-            const bFinished = b.stage === "finished" ? 1 : 0;
-            if (aFinished !== bFinished) return aFinished - bFinished;
-            // 날짜 최신순
-            return (b.date || "").localeCompare(a.date || "");
-          }).map((t) => (
-            <Card key={t.id} onClick={() => onSelect(t)} style={{ cursor: "pointer" }}>
+          {visible.map((t) => (
+            <Card key={t.id} onClick={() => onSelect(t)} style={{ cursor: "pointer", opacity: t.stage === "completed" ? 0.75 : 1 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <Badge type="info">{(t.type === "special" && t.specialName?.trim()) ? t.specialName.trim() : T(t.type)}</Badge>
+                  {t.stage === "completed" && <Badge type="confirmed">{T("completed")}</Badge>}
                   <h3 style={{ fontSize: 16, fontWeight: 600, color: colors.gray800, margin: 0 }}>{t.name}</h3>
                 </div>
                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
@@ -3187,6 +3251,24 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
     });
   };
 
+  // 토너먼트 강제 종료 — 진행/신청 단계 상관없이 즉시 완료 처리 후 지난 토너먼트로 이동
+  const endTournament = () => {
+    const msg = lang === "ko"
+      ? "이 토너먼트를 종료하시겠습니까? '지난 토너먼트' 탭으로 이동합니다."
+      : "End this tournament? It will move to the 'Past Tournaments' tab.";
+    if (!window.confirm(msg)) return;
+    onUpdateTournament(tournament.id, { stage: "completed" });
+  };
+
+  // 종료된 토너먼트 다시 열기
+  const reopenTournament = () => {
+    const msg = lang === "ko"
+      ? "종료된 토너먼트를 다시 진행 중 상태로 되돌립니다. 계속하시겠습니까?"
+      : "Reopen this tournament back to ongoing? Continue?";
+    if (!window.confirm(msg)) return;
+    onUpdateTournament(tournament.id, { stage: "ongoing" });
+  };
+
   // Generate groups (auto draw)
   const doGroupDraw = () => {
     const teams = confirmedRegs.map((r) => ({ id: r.id, name: r.teamName || r.playerName }));
@@ -3287,8 +3369,18 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
           <Btn variant="success" onClick={startTournament}>{T("startTournament")}</Btn>
         )}
         {isAdmin && tournament.stage === "ongoing" && (
-          <Btn variant="outline" size="sm" onClick={revertToRegistration}>
-            {lang === "ko" ? "시작 전으로" : "Revert to Registration"}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <Btn variant="danger" size="sm" onClick={endTournament}>
+              {lang === "ko" ? "대회 종료" : "End Tournament"}
+            </Btn>
+            <Btn variant="outline" size="sm" onClick={revertToRegistration}>
+              {lang === "ko" ? "시작 전으로" : "Revert"}
+            </Btn>
+          </div>
+        )}
+        {isAdmin && tournament.stage === "completed" && (
+          <Btn variant="outline" size="sm" onClick={reopenTournament}>
+            {lang === "ko" ? "다시 열기" : "Reopen"}
           </Btn>
         )}
       </div>
