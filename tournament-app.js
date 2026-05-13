@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.2";
+const APP_VERSION = "6.3";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2310,6 +2310,151 @@ function Modal({ onClose, children }) {
 }
 
 // ============================================================
+// GROUP DRAW ANIMATION MODAL
+// ============================================================
+function GroupDrawAnimationModal({ teams, groups, onConfirm, onCancel, lang }) {
+  // 추첨 순서: 두 조의 팀을 번갈아서 한 명씩 (드라마틱 연출)
+  const revealOrder = [];
+  const maxLen = Math.max(...groups.map((g) => g.teams.length));
+  for (let i = 0; i < maxLen; i++) {
+    groups.forEach((g) => {
+      if (g.teams[i]) revealOrder.push({ team: g.teams[i], groupName: g.name });
+    });
+  }
+
+  const [phase, setPhase] = useState("spinning"); // spinning → revealing → done
+  const [revealedCount, setRevealedCount] = useState(0);
+  const [cyclingName, setCyclingName] = useState(teams[0]?.name || "");
+
+  // Phase 1: 슬롯 머신처럼 이름 굴리기 (~1.6s)
+  useEffect(() => {
+    if (phase !== "spinning") return;
+    let iter = 0;
+    const interval = setInterval(() => {
+      setCyclingName(teams[iter % teams.length].name);
+      iter++;
+    }, 80);
+    const t = setTimeout(() => {
+      clearInterval(interval);
+      setPhase("revealing");
+    }, 1600);
+    return () => { clearInterval(interval); clearTimeout(t); };
+  }, [phase, teams]);
+
+  // Phase 2: 한 명씩 차례로 reveal
+  useEffect(() => {
+    if (phase !== "revealing") return;
+    if (revealedCount >= revealOrder.length) {
+      const t = setTimeout(() => setPhase("done"), 500);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => setRevealedCount((c) => c + 1), 750);
+    return () => clearTimeout(t);
+  }, [phase, revealedCount, revealOrder.length]);
+
+  const groupBuckets = groups.map((g) => ({ name: g.name, items: [] }));
+  for (let i = 0; i < revealedCount; i++) {
+    const { team, groupName } = revealOrder[i];
+    const idx = groupBuckets.findIndex((g) => g.name === groupName);
+    if (idx >= 0) groupBuckets[idx].items.push(team);
+  }
+
+  const currentReveal = phase === "revealing" && revealedCount < revealOrder.length
+    ? revealOrder[revealedCount]
+    : null;
+
+  return (
+    <Modal onClose={() => phase === "done" && onCancel()}>
+      <style>{`
+        @keyframes drawSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes drawPop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes drawSlide { from { transform: translateY(-12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes drawPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+      `}</style>
+      <div style={{ padding: 24, minWidth: 320 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, textAlign: "center", marginBottom: 16, color: colors.gray800 }}>
+          🎱 {lang === "ko" ? "조 추첨" : "Group Draw"}
+        </h2>
+
+        {phase === "spinning" && (
+          <div style={{ textAlign: "center", padding: "30px 20px" }}>
+            <div style={{ fontSize: 56, marginBottom: 18, display: "inline-block", animation: "drawSpin 0.6s linear infinite" }}>🎰</div>
+            <div style={{
+              fontSize: 28, fontWeight: 700, color: colors.primary, minHeight: 36,
+              background: colors.primaryLight, padding: "10px 20px", borderRadius: 12, display: "inline-block", minWidth: 200,
+            }}>
+              {cyclingName}
+            </div>
+            <div style={{ fontSize: 14, color: colors.gray500, marginTop: 14 }}>
+              {lang === "ko" ? "추첨 시작..." : "Drawing..."}
+            </div>
+          </div>
+        )}
+
+        {phase !== "spinning" && currentReveal && (
+          <div style={{
+            textAlign: "center", padding: "14px 16px", marginBottom: 16,
+            background: colors.primaryLight, borderRadius: 12,
+            animation: "drawPop 0.4s ease-out",
+          }}>
+            <div style={{ fontSize: 11, color: colors.gray500, marginBottom: 4, letterSpacing: 1 }}>
+              {lang === "ko" ? "NEXT" : "NEXT"}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: colors.gray800 }}>
+              {currentReveal.team.name}
+            </div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: colors.primary, marginTop: 6, animation: "drawPulse 0.6s ease-in-out infinite" }}>
+              → {currentReveal.groupName}{lang === "ko" ? "조" : ""}
+            </div>
+          </div>
+        )}
+
+        {phase === "done" && (
+          <div style={{
+            textAlign: "center", padding: "14px", marginBottom: 16,
+            background: colors.successLight, borderRadius: 12,
+            color: colors.success, fontWeight: 700, fontSize: 16,
+          }}>
+            ✓ {lang === "ko" ? "추첨 완료!" : "Draw complete!"}
+          </div>
+        )}
+
+        {/* 조 컬럼 */}
+        {phase !== "spinning" && (
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${groupBuckets.length}, 1fr)`, gap: 10 }}>
+            {groupBuckets.map((g) => (
+              <div key={g.name} style={{ background: colors.gray50, borderRadius: 12, padding: 10, minHeight: 80 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: colors.primary, marginBottom: 8, textAlign: "center" }}>
+                  {g.name}{lang === "ko" ? "조" : " Group"} <span style={{ fontSize: 12, color: colors.gray400 }}>({g.items.length})</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {g.items.map((t, ti) => (
+                    <div key={t.id} style={{
+                      padding: "6px 8px", background: colors.white, borderRadius: 6,
+                      fontSize: 13, fontWeight: 600, color: colors.gray800,
+                      animation: ti === g.items.length - 1 && phase === "revealing" ? "drawSlide 0.4s ease-out" : undefined,
+                    }}>
+                      {t.name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {phase === "done" && (
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 20 }}>
+            <Btn variant="outline" onClick={onCancel}>{lang === "ko" ? "다시 추첨" : "Re-draw"}</Btn>
+            <Btn variant="success" onClick={onConfirm}>{lang === "ko" ? "확정" : "Confirm"}</Btn>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ============================================================
 // BUTTON COMPONENT
 // ============================================================
 function Btn({ variant = "primary", size = "md", onClick, children, disabled, style: extraStyle }) {
@@ -3151,6 +3296,7 @@ function applySnakeSeeding(teams, numGroups) {
 function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRejectRegistration, onSubmitRegistration, onUpdateTournament, players, onAddPlayer, onUpdateRankings, T, lang }) {
   const [tab, setTab] = useState("info");
   const [showRegForm, setShowRegForm] = useState(false);
+  const [drawAnimation, setDrawAnimation] = useState(null); // { teams, data }
   const [editingSettings, setEditingSettings] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
 
@@ -3269,11 +3415,28 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
     onUpdateTournament(tournament.id, { stage: "ongoing" });
   };
 
-  // Generate groups (auto draw)
+  // Generate groups (auto draw) — 애니메이션 후 확정
   const doGroupDraw = () => {
     const teams = confirmedRegs.map((r) => ({ id: r.id, name: r.teamName || r.playerName }));
     const data = generateBracketForTeams(teams, tournament.type);
-    onUpdateTournament(tournament.id, data);
+    if (data.groups && data.groups.length >= 2) {
+      // 추첨 애니메이션 표시
+      setDrawAnimation({ teams, data });
+    } else {
+      // 그룹 없는 타입 (cup, league 등)은 즉시 적용
+      onUpdateTournament(tournament.id, data);
+    }
+  };
+
+  const confirmDrawAnimation = () => {
+    if (drawAnimation) {
+      onUpdateTournament(tournament.id, drawAnimation.data);
+      setDrawAnimation(null);
+    }
+  };
+
+  const cancelDrawAnimation = () => {
+    setDrawAnimation(null);
   };
 
   // Manual group save (admin assigns teams to groups)
@@ -3584,6 +3747,17 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
         }}>
           {toastMsg}
         </div>
+      )}
+
+      {/* 조 추첨 애니메이션 모달 */}
+      {drawAnimation && (
+        <GroupDrawAnimationModal
+          teams={drawAnimation.teams}
+          groups={drawAnimation.data.groups}
+          onConfirm={confirmDrawAnimation}
+          onCancel={cancelDrawAnimation}
+          lang={lang}
+        />
       )}
     </div>
   );
