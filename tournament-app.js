@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.3";
+const APP_VERSION = "6.4";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2513,6 +2513,23 @@ function Badge({ type, children }) {
 }
 
 // ============================================================
+// MATCH SCHEDULE CHIP (시작시간 / 코트 표시)
+// ============================================================
+function MatchSchedChip({ match }) {
+  if (!match || (!match.matchTime && !match.court)) return null;
+  return (
+    <span style={{
+      display: "inline-block", fontSize: 11, fontWeight: 700, color: colors.primary,
+      background: colors.primaryLight, padding: "1px 7px", borderRadius: 6, marginRight: 6, whiteSpace: "nowrap",
+    }}>
+      {match.matchTime ? `🕐 ${match.matchTime}` : ""}
+      {match.matchTime && match.court ? " · " : ""}
+      {match.court || ""}
+    </span>
+  );
+}
+
+// ============================================================
 // CARD
 // ============================================================
 function Card({ children, style: extraStyle, onClick }) {
@@ -4479,21 +4496,24 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   };
 
   // === AMERICANO SCORE / ROUND / RESET (그룹 + 플랫 모두 지원) ===
-  const saveAmericanoScore = (roundIdx, matchId, team1Score, team2Score, groupIdx) => {
+  const saveAmericanoScore = (roundIdx, matchId, team1Score, team2Score, groupIdx, extra) => {
     const data = { ...americanoData };
+    const isScheduleOnly = extra?.completed === false;
+    const sched = extra ? { court: extra.court ?? null, matchTime: extra.matchTime ?? null } : {};
+    const applyMatch = (m) => m.id === matchId ? {
+      ...m,
+      ...(isScheduleOnly ? {} : { team1Score: parseInt(team1Score), team2Score: parseInt(team2Score), completed: true }),
+      ...sched,
+    } : m;
     if (data.useGroups && groupIdx != null) {
       const phase = data.phase === "final" ? "finalGroups" : data.phase === "stage2" ? "stage2Groups" : "groups";
       const gArr = [...data[phase]];
       const g = { ...gArr[groupIdx] };
-      g.rounds = g.rounds.map((round, ri) =>
-        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(team1Score), team2Score: parseInt(team2Score), completed: true } : m) : round
-      );
+      g.rounds = g.rounds.map((round, ri) => ri === roundIdx ? round.map(applyMatch) : round);
       gArr[groupIdx] = g;
       data[phase] = gArr;
     } else {
-      data.rounds = data.rounds.map((round, ri) =>
-        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(team1Score), team2Score: parseInt(team2Score), completed: true } : m) : round
-      );
+      data.rounds = data.rounds.map((round, ri) => ri === roundIdx ? round.map(applyMatch) : round);
     }
     updateData({ americanoData: data });
     setScoreModal(null);
@@ -4574,31 +4594,32 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     updateData({ specialData: null });
   };
 
-  const saveSpecialScore = (roundIdx, matchId, t1Score, t2Score, groupIdx, isFinalGroup) => {
+  const saveSpecialScore = (roundIdx, matchId, t1Score, t2Score, groupIdx, isFinalGroup, extra) => {
     const data = { ...specialData };
+    const isScheduleOnly = extra?.completed === false;
+    const sched = extra ? { court: extra.court ?? null, matchTime: extra.matchTime ?? null } : {};
+    const applyMatch = (m) => m.id === matchId ? {
+      ...m,
+      ...(isScheduleOnly ? {} : { team1Score: parseInt(t1Score), team2Score: parseInt(t2Score), completed: true }),
+      ...sched,
+    } : m;
     if (isFinalGroup) {
       const fg = { ...data.finalGroup };
-      fg.rounds = fg.rounds.map((round, ri) =>
-        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(t1Score), team2Score: parseInt(t2Score), completed: true } : m) : round
-      );
+      fg.rounds = fg.rounds.map((round, ri) => ri === roundIdx ? round.map(applyMatch) : round);
       data.finalGroup = fg;
     } else if (data.format === "selection-12") {
       // selection-12: stage1 = groups, stage2 = stage2Groups (americano-style)
       const phase = data.phase === "stage2" ? "stage2Groups" : "groups";
       const arr = [...data[phase]];
       const g = { ...arr[groupIdx] };
-      g.rounds = g.rounds.map((round, ri) =>
-        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(t1Score), team2Score: parseInt(t2Score), completed: true } : m) : round
-      );
+      g.rounds = g.rounds.map((round, ri) => ri === roundIdx ? round.map(applyMatch) : round);
       arr[groupIdx] = g;
       data[phase] = arr;
     } else {
       // selection-5, selection-10: groups
       const arr = [...data.groups];
       const g = { ...arr[groupIdx] };
-      g.rounds = g.rounds.map((round, ri) =>
-        ri === roundIdx ? round.map((m) => m.id === matchId ? { ...m, team1Score: parseInt(t1Score), team2Score: parseInt(t2Score), completed: true } : m) : round
-      );
+      g.rounds = g.rounds.map((round, ri) => ri === roundIdx ? round.map(applyMatch) : round);
       arr[groupIdx] = g;
       data.groups = arr;
     }
@@ -4723,6 +4744,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               {round.map((m) => (
                 <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${colors.gray100}` }}>
                   <div style={{ flex: 1, fontSize: 13 }}>
+                    <MatchSchedChip match={m} />
                     <span>{m.team1?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                     <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
                     <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
@@ -4944,7 +4966,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               homeName={scoreModal.match.team1?.map((pid) => getTeamName(pid)).join(" & ")}
               awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
               isAmericano
-              onSave={(s1, s2) => saveAmericanoScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, scoreModal.groupIdx)}
+              onSave={(s1, s2, setScores, extra) => saveAmericanoScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, scoreModal.groupIdx, extra)}
               onClose={() => setScoreModal(null)}
               T={T}
             />
@@ -5008,6 +5030,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               {round.map((m) => (
                 <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${colors.gray100}` }}>
                   <div style={{ flex: 1, fontSize: 13 }}>
+                    <MatchSchedChip match={m} />
                     <span>{m.team1?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                     <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
                     <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
@@ -5046,7 +5069,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
             homeName={scoreModal.match.team1?.map((pid) => getTeamName(pid)).join(" & ")}
             awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
             isAmericano
-            onSave={(s1, s2) => saveAmericanoScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2)}
+            onSave={(s1, s2, setScores, extra) => saveAmericanoScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, undefined, extra)}
             onClose={() => setScoreModal(null)}
             T={T}
           />
@@ -5188,6 +5211,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                 {round.map((m) => (
                   <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${colors.gray100}` }}>
                     <div style={{ flex: 1, fontSize: 13 }}>
+                      <MatchSchedChip match={m} />
                       <span>{m.team1?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                       <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
                       <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
@@ -5353,6 +5377,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                   background: groupIdx === 0 ? colors.primaryLight : "#fef3c7",
                   color: groupIdx === 0 ? colors.primary : "#92400e",
                 }}>{groupLabel}</span>
+                <MatchSchedChip match={m} />
                 <span>{m.team1?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                 <span style={{ color: colors.gray400, margin: "0 4px" }}>vs</span>
                 <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
@@ -5453,7 +5478,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
             homeName={scoreModal.match.team1?.map((pid) => getTeamName(pid)).join(" & ")}
             awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
             isAmericano
-            onSave={(s1, s2) => saveSpecialScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, scoreModal.groupIdx, scoreModal.isFinalGroup)}
+            onSave={(s1, s2, setScores, extra) => saveSpecialScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, scoreModal.groupIdx, scoreModal.isFinalGroup, extra)}
             onClose={() => setScoreModal(null)}
             T={T}
           />
@@ -5641,6 +5666,9 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                       return (
                         <div key={m.id} style={{ display: "flex", alignItems: "center", padding: "6px 12px", background: colors.gray50, borderRadius: 8, marginBottom: 4 }}>
                           <span style={{ fontSize: 11, fontWeight: 600, color: colors.gray400, minWidth: 50, flexShrink: 0 }}>{T("match")} {matchNum}</span>
+                          {(m.matchTime || m.court) && (
+                            <span style={{ flexShrink: 0, marginRight: 4 }}><MatchSchedChip match={m} /></span>
+                          )}
                           <span style={{ flex: 1, textAlign: "right", fontWeight: 500, fontSize: 13 }}>{getTeamName(m.home)}</span>
                           {m.completed ? (
                             <span style={{ padding: "0 16px", fontWeight: 700, fontSize: 15, cursor: isAdmin ? "pointer" : "default" }}
