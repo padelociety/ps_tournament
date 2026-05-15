@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.5";
+const APP_VERSION = "6.6";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -4660,15 +4660,31 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     );
   };
 
+  // 스코어보드 송출용 영문 제목 빌더
+  // 형식: "{대회명}: {카테고리}[ Group {X}] {경기 라벨}"
+  // 예) "PS 6th Open: Men's Bronze Group A Match 3" / 조 1개면 "...Men's Bronze Match 3"
+  const _SHORT_GENDER_EN = { menDoubles: "Men's", womenDoubles: "Women's", mixedDoubles: "Mixed", openDoubles: "Open" };
+  const _catLabelEn = (() => {
+    const g = tournament.categoryGender ? (_SHORT_GENDER_EN[tournament.categoryGender] || "") : "";
+    const lv = tournament.categoryLevel ? (translations.en[tournament.categoryLevel] || "") : "";
+    return [g, lv].filter(Boolean).join(" ");
+  })();
+  const buildLiveTitle = ({ groupName, groupCount, unitLabel }) => {
+    let s = tournament.name || "Tournament";
+    if (_catLabelEn) s += ": " + _catLabelEn;
+    if (groupName && groupCount > 1) s += " Group " + groupName;
+    if (unitLabel) s += " " + unitLabel;
+    return s;
+  };
+
   // 라이브 점수 패널 (liveMatch 설정 시 표시) — 여러 return 분기에서 공통 사용
-  const _tournamentTitle = (tournament.specialName?.trim() || tournament.name || "");
   const liveScorePanelEl = liveMatch ? (
     <LiveScorePanel
       match={liveMatch.match}
       homeName={liveMatch.homeName}
       awayName={liveMatch.awayName}
-      tournamentTitle={_tournamentTitle + (liveMatch.matchLabel ? " · " + liveMatch.matchLabel : "")}
-      matchLabel={liveMatch.matchLabel}
+      tournamentTitle={liveMatch.title || ""}
+      matchLabel={liveMatch.title || ""}
       setMode={liveMatch.setMode}
       onLiveUpdate={liveUpdate}
       onEnd={liveEnd}
@@ -5074,7 +5090,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                       homeName: m.team1?.map((pid) => getTeamName(pid)).join(" & "),
                       awayName: m.team2?.map((pid) => getTeamName(pid)).join(" & "),
                       setMode: false,
-                      matchLabel: `${group.name}${lang === "ko" ? "조" : ""} · ${T("round")} ${ri + 1}`,
+                      title: buildLiveTitle({ groupName: group.name, groupCount: americanoData?.groups?.length || 1, unitLabel: `Round ${ri + 1}` }),
                     }),
                   })}
                 </div>
@@ -5361,7 +5377,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                       homeName: m.team1?.map((pid) => getTeamName(pid)).join(" & "),
                       awayName: m.team2?.map((pid) => getTeamName(pid)).join(" & "),
                       setMode: false,
-                      matchLabel: `${T("round")} ${ri + 1}`,
+                      title: buildLiveTitle({ groupName: null, groupCount: 1, unitLabel: `Round ${ri + 1}` }),
                     }),
                   })}
                 </div>
@@ -5543,7 +5559,11 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                         homeName: m.team1?.map((pid) => getTeamName(pid)).join(" & "),
                         awayName: m.team2?.map((pid) => getTeamName(pid)).join(" & "),
                         setMode: false,
-                        matchLabel: `${isFinalGroup ? T("specialFinalRound") : group.name + (lang === "ko" ? "조" : "")} · ${T("round")} ${ri + 1}`,
+                        title: buildLiveTitle({
+                          groupName: isFinalGroup ? null : group.name,
+                          groupCount: specialData?.groups?.length || 1,
+                          unitLabel: isFinalGroup ? `Final Round ${ri + 1}` : `Round ${ri + 1}`,
+                        }),
                       }),
                     })}
                   </div>
@@ -5709,7 +5729,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                   homeName: m.team1?.map((pid) => getTeamName(pid)).join(" & "),
                   awayName: m.team2?.map((pid) => getTeamName(pid)).join(" & "),
                   setMode: false,
-                  matchLabel: `${groupLabel}${lang === "ko" ? "조" : ""} · ${T("round")} ${ri + 1}`,
+                  title: buildLiveTitle({ groupName: groupLabel, groupCount: 2, unitLabel: `Round ${ri + 1}` }),
                 }),
               })}
             </div>
@@ -5995,7 +6015,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                               kind: "rr", match: m, roundIdx: ri, groupIdx: gi,
                               homeName: getTeamName(m.home), awayName: getTeamName(m.away),
                               setMode: false,
-                              matchLabel: `${group.name}${lang === "ko" ? "조" : ""} · ${T("match")} ${matchNum}`,
+                              title: buildLiveTitle({ groupName: group.name, groupCount: groups.length, unitLabel: `Match ${matchNum}` }),
                             });
                             if (m.completed) {
                               return (
@@ -6101,7 +6121,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                     match: m, roundIdx: ri,
                     homeName: getTeamName(m.home), awayName: getTeamName(m.away),
                     setMode: roundFormat === "set3" || roundFormat === "set2super",
-                    matchLabel: isThirdPlace ? T("thirdPlace") : (m.round || T("knockout")),
+                    title: buildLiveTitle({ groupName: null, groupCount: 1, unitLabel: isThirdPlace ? "3rd Place" : (m.round || "Knockout") }),
                   })}>
                   {m.live ? `📡 ${T("broadcasting")}` : `🔴 ${T("live")}`}
                 </Btn>
