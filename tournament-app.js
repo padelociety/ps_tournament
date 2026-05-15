@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.6";
+const APP_VERSION = "6.7";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2504,7 +2504,7 @@ function GroupDrawAnimationModal({ teams, groups, onConfirm, onCancel, lang }) {
 // ============================================================
 // LIVE SCORE PANEL (코트 태블릿 라이브 점수 + 스코어보드 송출)
 // ============================================================
-function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel, setMode, onLiveUpdate, onEnd, onClose, T, lang }) {
+function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel, setMode, onLiveUpdate, onEnd, onCancel, onClose, isAdmin, T, lang }) {
   const numOr0 = (v) => (typeof v === "number" && !isNaN(v) ? v : 0);
   const initGameA = numOr0(match.homeScore ?? match.team1Score);
   const initGameB = numOr0(match.awayScore ?? match.team2Score);
@@ -2655,8 +2655,13 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
         )}
 
         {/* 하단 버튼 */}
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 20 }}>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 20, flexWrap: "wrap" }}>
           <Btn variant="outline" onClick={onClose}>{T("cancel")}</Btn>
+          {isAdmin && onCancel && (
+            <Btn variant="outline" onClick={onCancel} style={{ borderColor: colors.danger, color: colors.danger }}>
+              {lang === "ko" ? "라이브 취소(초기화)" : "Cancel Live (Reset)"}
+            </Btn>
+          )}
           <Btn variant="danger" onClick={handleEnd}>{T("endMatch")}</Btn>
         </div>
       </div>
@@ -4637,6 +4642,85 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
     setLiveMatch(null);
   };
 
+  // 경기 점수/라이브 상태 초기화 (관리자 전용)
+  // ctx: { kind, match, roundIdx, groupIdx, isFinalGroup }
+  const clearMatch = (ctx) => {
+    const matchId = ctx.match.id;
+    const reset = { homeScore: null, awayScore: null, team1Score: null, team2Score: null, setScores: null, completed: false, live: false };
+    const apply = (m) => m.id === matchId ? { ...m, ...reset } : m;
+
+    if (ctx.kind === "rr") {
+      const newGroups = groups.map((g, gi) => gi !== ctx.groupIdx ? g : {
+        ...g, rounds: g.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(apply)),
+      });
+      updateData({ groups: newGroups });
+    } else if (ctx.kind === "knockout") {
+      const bracket = { ...knockoutBracket };
+      bracket.rounds = bracket.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(apply));
+      // 결승 초기화 시 stage가 completed였으면 ongoing으로 되돌림
+      const updates = { knockoutBracket: bracket };
+      if (tournament.stage === "completed") updates.stage = "ongoing";
+      updateData(updates);
+    } else if (ctx.kind === "thirdPlace") {
+      const bracket = { ...knockoutBracket };
+      bracket.thirdPlaceMatch = apply(bracket.thirdPlaceMatch);
+      const updates = { knockoutBracket: bracket };
+      if (tournament.stage === "completed") updates.stage = "ongoing";
+      updateData(updates);
+    } else if (ctx.kind === "americano") {
+      const data = { ...americanoData };
+      if (data.useGroups && ctx.groupIdx != null) {
+        const phase = data.phase === "final" ? "finalGroups" : data.phase === "stage2" ? "stage2Groups" : "groups";
+        data[phase] = data[phase].map((g, gi) => gi !== ctx.groupIdx ? g : {
+          ...g, rounds: g.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(apply)),
+        });
+      } else {
+        data.rounds = data.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(apply));
+      }
+      updateData({ americanoData: data });
+    } else if (ctx.kind === "special") {
+      const data = { ...specialData };
+      if (ctx.isFinalGroup) {
+        data.finalGroup = { ...data.finalGroup, rounds: data.finalGroup.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(apply)) };
+      } else if (data.format === "selection-12") {
+        const phase = data.phase === "stage2" ? "stage2Groups" : "groups";
+        data[phase] = data[phase].map((g, gi) => gi !== ctx.groupIdx ? g : { ...g, rounds: g.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(apply)) });
+      } else {
+        data.groups = data.groups.map((g, gi) => gi !== ctx.groupIdx ? g : { ...g, rounds: g.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(apply)) });
+      }
+      updateData({ specialData: data });
+    }
+  };
+
+  // ScoreModal에서 "초기화" 클릭
+  const resetMatchFromModal = (modalCtx) => {
+    if (!window.confirm(lang === "ko" ? "이 경기의 점수를 초기화하시겠습니까?" : "Reset this match score?")) return;
+    let ctx;
+    if (modalCtx.type === "rr") {
+      ctx = { kind: "rr", match: modalCtx.match, roundIdx: modalCtx.roundIdx, groupIdx: modalCtx.groupIdx };
+    } else if (modalCtx.type === "knockout") {
+      ctx = { kind: "knockout", match: modalCtx.match, roundIdx: modalCtx.roundIdx };
+    } else if (modalCtx.type === "thirdPlace") {
+      ctx = { kind: "thirdPlace", match: modalCtx.match };
+    } else if (modalCtx.type === "americano") {
+      ctx = { kind: "americano", match: modalCtx.match, roundIdx: modalCtx.roundIdx, groupIdx: modalCtx.groupIdx };
+    } else if (modalCtx.type === "special") {
+      ctx = { kind: "special", match: modalCtx.match, roundIdx: modalCtx.roundIdx, groupIdx: modalCtx.groupIdx, isFinalGroup: modalCtx.isFinalGroup };
+    }
+    if (ctx) {
+      clearMatch(ctx);
+      setScoreModal(null);
+    }
+  };
+
+  // LiveScorePanel에서 "라이브 취소" 클릭
+  const cancelLive = () => {
+    if (!liveMatch) return;
+    if (!window.confirm(lang === "ko" ? "라이브를 취소하고 점수를 초기화하시겠습니까?" : "Cancel live and reset score?")) return;
+    clearMatch(liveMatch);
+    setLiveMatch(null);
+  };
+
   // 경기 줄의 점수/컨트롤 영역 (완료 점수 / 🔴 라이브 / 점수입력)
   const renderMatchControl = ({ m, a, b, onEditScore, liveCtx }) => {
     const scoreText = `${a ?? 0} - ${b ?? 0}`;
@@ -4688,7 +4772,9 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
       setMode={liveMatch.setMode}
       onLiveUpdate={liveUpdate}
       onEnd={liveEnd}
+      onCancel={cancelLive}
       onClose={() => setLiveMatch(null)}
+      isAdmin={isAdmin}
       T={T}
       lang={lang}
     />
@@ -5300,6 +5386,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
               isAmericano
               onSave={(s1, s2, setScores, extra) => saveAmericanoScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, scoreModal.groupIdx, extra)}
+              onReset={isAdmin ? () => resetMatchFromModal(scoreModal) : undefined}
               onClose={() => setScoreModal(null)}
               T={T}
             />
@@ -5404,6 +5491,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
             awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
             isAmericano
             onSave={(s1, s2, setScores, extra) => saveAmericanoScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, undefined, extra)}
+            onReset={isAdmin ? () => resetMatchFromModal(scoreModal) : undefined}
             onClose={() => setScoreModal(null)}
             T={T}
           />
@@ -5818,6 +5906,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
             awayName={scoreModal.match.team2?.map((pid) => getTeamName(pid)).join(" & ")}
             isAmericano
             onSave={(s1, s2, setScores, extra) => saveSpecialScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, scoreModal.groupIdx, scoreModal.isFinalGroup, extra)}
+            onReset={isAdmin ? () => resetMatchFromModal(scoreModal) : undefined}
             onClose={() => setScoreModal(null)}
             T={T}
           />
@@ -6011,11 +6100,12 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                           )}
                           <span style={{ flex: 1, textAlign: "right", fontWeight: 500, fontSize: 13 }}>{getTeamName(m.home)}</span>
                           {(() => {
+                            const _matchNo = matchNum; // 클로저 캡처 (matchNum이 .map 진행 중 변하므로 값 고정)
                             const liveCtx = () => ({
                               kind: "rr", match: m, roundIdx: ri, groupIdx: gi,
                               homeName: getTeamName(m.home), awayName: getTeamName(m.away),
                               setMode: false,
-                              title: buildLiveTitle({ groupName: group.name, groupCount: groups.length, unitLabel: `Match ${matchNum}` }),
+                              title: buildLiveTitle({ groupName: group.name, groupCount: groups.length, unitLabel: `Match ${_matchNo}` }),
                             });
                             if (m.completed) {
                               return (
@@ -6276,6 +6366,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               saveKnockoutScore(scoreModal.roundIdx, scoreModal.match.id, s1, s2, setScores, extra);
             }
           }}
+          onReset={isAdmin ? () => resetMatchFromModal(scoreModal) : undefined}
           onClose={() => setScoreModal(null)}
           T={T}
         />
@@ -6769,7 +6860,7 @@ function RankingPage({ rankings, tournaments, players, T, lang, onRecalcPoints, 
 // ============================================================
 // SCORE MODAL
 // ============================================================
-function ScoreModal({ match, homeName, awayName, isAmericano, format, onSave, onClose, T }) {
+function ScoreModal({ match, homeName, awayName, isAmericano, format, onSave, onClose, onReset, T }) {
   // Determine number of sets based on format
   // set3: best of 3 sets, set2super: 2 sets + super tiebreak, set1game8/set1game6: 1 set
   const getSetCount = () => {
@@ -6892,8 +6983,11 @@ function ScoreModal({ match, homeName, awayName, isAmericano, format, onSave, on
               <input type="time" value={matchTime} onChange={(e) => setMatchTime(e.target.value)} style={inputStyle} />
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="outline" onClick={onClose}>{T("cancel")}</Btn>
+            {onReset && (match.completed || match.live) && (
+              <Btn variant="danger" onClick={onReset}>{lang === "ko" ? "초기화" : "Reset"}</Btn>
+            )}
             <Btn onClick={handleSave} disabled={!hasScore && !hasScheduleInfo}>{T("saveScore")}</Btn>
           </div>
         </div>
@@ -6958,8 +7052,11 @@ function ScoreModal({ match, homeName, awayName, isAmericano, format, onSave, on
           </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: 8 }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
           <Btn variant="outline" onClick={onClose}>{T("cancel")}</Btn>
+          {onReset && (match.completed || match.live) && (
+            <Btn variant="danger" onClick={onReset}>{lang === "ko" ? "초기화" : "Reset"}</Btn>
+          )}
           <Btn onClick={handleSave} disabled={!canSaveSet() && !hasScheduleInfo}>{T("saveScore")}</Btn>
         </div>
       </div>

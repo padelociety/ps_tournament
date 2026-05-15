@@ -1,4 +1,4 @@
-const CACHE_NAME = "ps-tournament-v58";
+const CACHE_NAME = "ps-tournament-v59";
 const OWN_ASSETS = [
   "./tournament.html",
   "./tournament-app.js",
