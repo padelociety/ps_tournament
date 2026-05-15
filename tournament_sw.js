@@ -1,4 +1,4 @@
-const CACHE_NAME = "ps-tournament-v56";
+const CACHE_NAME = "ps-tournament-v57";
 const OWN_ASSETS = [
   "./tournament.html",
   "./tournament-app.js",
@@ -14,6 +14,7 @@ const CDN_ASSETS = [
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js",
+  "https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js",
 ];
 
 self.addEventListener("install", (e) => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.4";
+const APP_VERSION = "6.5";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -50,6 +50,14 @@ const translations = {
     specialParallelSeparateDesc: "A조 다 끝나고 → B조",
     specialParallelTogether: "같이 진행",
     specialParallelTogetherDesc: "A·B조 라운드별 병행",
+    live: "라이브",
+    liveScore: "라이브 점수",
+    broadcastOn: "방송 송출 ON",
+    broadcastOff: "방송 송출 OFF",
+    broadcasting: "송출 중",
+    endMatch: "경기 종료",
+    superTiebreak: "슈퍼 타이브레이크",
+    nextSet: "다음 세트",
     roundRobinGames: "라운드로빈 게임 수",
     knockoutFormat: "녹아웃 스테이지 포맷",
     set3: "3세트",
@@ -277,6 +285,14 @@ const translations = {
     specialParallelSeparateDesc: "A finishes, then B",
     specialParallelTogether: "Together",
     specialParallelTogetherDesc: "A & B run in parallel by round",
+    live: "Live",
+    liveScore: "Live Score",
+    broadcastOn: "Broadcast ON",
+    broadcastOff: "Broadcast OFF",
+    broadcasting: "On Air",
+    endMatch: "End Match",
+    superTiebreak: "Super Tiebreak",
+    nextSet: "Next Set",
     roundRobinGames: "Round Robin Games",
     knockoutFormat: "Knockout Stage Format",
     set3: "3 Sets",
@@ -532,6 +548,37 @@ const saveToFirestore = async (docId, list) => {
     console.error("[save] FAILED:", e);
     showSaveStatus("✗ 저장 실패: " + e.message, true);
     return false;
+  }
+};
+
+// ============================================================
+// SCOREBOARD (ps-scoreboard Realtime DB 연동)
+// ============================================================
+// 기존 ps-scoreboard 시스템은 RTDB 'scoreboard' 단일 경로를 읽음.
+// 데이터 모양: { title, a:{name,game,point,sets,serving}, b:{...}, superTB }
+const pushToScoreboard = (payload) => {
+  try {
+    if (!window.rtdb) return;
+    window.rtdb.ref("scoreboard").set({
+      title: payload.title || "",
+      a: {
+        name: payload.a?.name || "Team A",
+        game: payload.a?.game ?? 0,
+        point: 0,
+        sets: payload.a?.sets || [],
+        serving: false,
+      },
+      b: {
+        name: payload.b?.name || "Team B",
+        game: payload.b?.game ?? 0,
+        point: 0,
+        sets: payload.b?.sets || [],
+        serving: false,
+      },
+      superTB: payload.superTB || false,
+    });
+  } catch (e) {
+    console.error("scoreboard push failed:", e);
   }
 };
 
@@ -2455,6 +2502,169 @@ function GroupDrawAnimationModal({ teams, groups, onConfirm, onCancel, lang }) {
 }
 
 // ============================================================
+// LIVE SCORE PANEL (코트 태블릿 라이브 점수 + 스코어보드 송출)
+// ============================================================
+function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel, setMode, onLiveUpdate, onEnd, onClose, T, lang }) {
+  const numOr0 = (v) => (typeof v === "number" && !isNaN(v) ? v : 0);
+  const initGameA = numOr0(match.homeScore ?? match.team1Score);
+  const initGameB = numOr0(match.awayScore ?? match.team2Score);
+  const initSets = (setMode && match.setScores) ? match.setScores.map((s) => ({ h: s.h, a: s.a })) : [];
+
+  // setMode: completedSets는 끝난 세트들, gameA/gameB는 현재 세트
+  // game mode: gameA/gameB가 곧 최종 게임 카운트
+  const [gameA, setGameA] = useState(setMode ? 0 : initGameA);
+  const [gameB, setGameB] = useState(setMode ? 0 : initGameB);
+  const [completedSets, setCompletedSets] = useState(initSets);
+  const [superTB, setSuperTB] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(true);
+
+  // 스코어보드 송출 (변경 시마다)
+  useEffect(() => {
+    if (!broadcasting) return;
+    pushToScoreboard({
+      title: tournamentTitle || "",
+      a: { name: homeName, game: gameA, sets: completedSets.map((s) => s.h) },
+      b: { name: awayName, game: gameB, sets: completedSets.map((s) => s.a) },
+      superTB,
+    });
+  }, [gameA, gameB, completedSets, superTB, broadcasting, homeName, awayName, tournamentTitle]);
+
+  // Firestore 라이브 저장
+  const persist = (ga, gb, sets) => {
+    if (setMode) {
+      let hw = 0, aw = 0;
+      sets.forEach((s) => { if (s.h > s.a) hw++; else if (s.a > s.h) aw++; });
+      onLiveUpdate(hw, aw, sets);
+    } else {
+      onLiveUpdate(ga, gb, null);
+    }
+  };
+
+  const chGame = (side, delta) => {
+    if (side === "a") {
+      const v = Math.max(0, gameA + delta);
+      setGameA(v);
+      persist(v, gameB, completedSets);
+    } else {
+      const v = Math.max(0, gameB + delta);
+      setGameB(v);
+      persist(gameA, v, completedSets);
+    }
+  };
+
+  const addSet = () => {
+    if (gameA === 0 && gameB === 0) return;
+    const newSets = [...completedSets, { h: gameA, a: gameB }];
+    setCompletedSets(newSets);
+    setGameA(0);
+    setGameB(0);
+    persist(0, 0, newSets);
+  };
+
+  const handleEnd = () => {
+    if (setMode) {
+      const allSets = (gameA > 0 || gameB > 0) ? [...completedSets, { h: gameA, a: gameB }] : completedSets;
+      let hw = 0, aw = 0;
+      allSets.forEach((s) => { if (s.h > s.a) hw++; else if (s.a > s.h) aw++; });
+      onEnd(hw, aw, allSets);
+    } else {
+      onEnd(gameA, gameB, null);
+    }
+  };
+
+  const counterBtn = (label, onClick, bg) => (
+    <button onClick={onClick} style={{
+      width: "100%", padding: "18px 0", fontSize: 32, fontWeight: 800,
+      border: "none", borderRadius: 12, cursor: "pointer",
+      background: bg, color: colors.white, lineHeight: 1,
+      WebkitTapHighlightColor: "transparent", userSelect: "none",
+    }}>{label}</button>
+  );
+
+  const teamPanel = (side, name, game) => (
+    <div style={{ flex: 1, textAlign: "center", padding: 8 }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color: colors.gray800, marginBottom: 8, minHeight: 40, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {name}
+      </div>
+      <div style={{
+        fontSize: 72, fontWeight: 900, color: colors.primary, lineHeight: 1,
+        margin: "8px 0 14px", fontFamily: "monospace",
+      }}>{game}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {counterBtn("+1", () => chGame(side, 1), colors.primary)}
+        {counterBtn("−1", () => chGame(side, -1), colors.gray400)}
+      </div>
+    </div>
+  );
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: 20 }}>
+        {/* 헤더 */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <h3 style={{ fontSize: 17, fontWeight: 800, color: colors.gray800, margin: 0 }}>
+            🔴 {T("liveScore")}
+          </h3>
+          <button onClick={() => setBroadcasting((b) => !b)} style={{
+            padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: "pointer",
+            border: `2px solid ${broadcasting ? colors.danger : colors.gray300}`,
+            background: broadcasting ? colors.danger : colors.white,
+            color: broadcasting ? colors.white : colors.gray500,
+          }}>
+            {broadcasting ? `📡 ${T("broadcasting")}` : T("broadcastOff")}
+          </button>
+        </div>
+        {matchLabel && <p style={{ fontSize: 12, color: colors.gray500, margin: "0 0 12px" }}>{matchLabel}</p>}
+
+        {/* 완료된 세트 (set mode) */}
+        {setMode && completedSets.length > 0 && (
+          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 10, flexWrap: "wrap" }}>
+            {completedSets.map((s, i) => (
+              <span key={i} style={{
+                padding: "4px 10px", borderRadius: 8, background: colors.gray100,
+                fontSize: 13, fontWeight: 700, color: colors.gray700,
+              }}>
+                {lang === "ko" ? `${i + 1}세트` : `Set ${i + 1}`} {s.h}-{s.a}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* 카운터 */}
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+          {teamPanel("a", homeName, gameA)}
+          <div style={{ alignSelf: "center", fontSize: 24, fontWeight: 700, color: colors.gray300, paddingTop: 40 }}>:</div>
+          {teamPanel("b", awayName, gameB)}
+        </div>
+
+        {/* set mode 컨트롤 */}
+        {setMode && (
+          <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "center" }}>
+            <Btn size="sm" variant="outline" onClick={addSet}>
+              <Icon name="plus" size={14} />{T("nextSet")}
+            </Btn>
+            <button onClick={() => setSuperTB((v) => !v)} style={{
+              padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer",
+              border: `2px solid ${superTB ? colors.warning : colors.gray300}`,
+              background: superTB ? colors.warning : colors.white,
+              color: superTB ? colors.white : colors.gray500,
+            }}>
+              🏆 {T("superTiebreak")} {superTB ? "ON" : "OFF"}
+            </button>
+          </div>
+        )}
+
+        {/* 하단 버튼 */}
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 20 }}>
+          <Btn variant="outline" onClick={onClose}>{T("cancel")}</Btn>
+          <Btn variant="danger" onClick={handleEnd}>{T("endMatch")}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ============================================================
 // BUTTON COMPONENT
 // ============================================================
 function Btn({ variant = "primary", size = "md", onClick, children, disabled, style: extraStyle }) {
@@ -4329,6 +4539,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   const [groupAssign, setGroupAssign] = useState({});
   const [editingKnockout, setEditingKnockout] = useState(false);
   const [knockoutEdit, setKnockoutEdit] = useState(null); // { roundIdx, matches: [{id, home, away}] }
+  const [liveMatch, setLiveMatch] = useState(null); // { kind, match, roundIdx, groupIdx, isFinalGroup, homeName, awayName, setMode, matchLabel }
 
   const groups = tournament.groups || null;
   const knockoutBracket = tournament.knockoutBracket || null;
@@ -4360,6 +4571,112 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   const updateData = (updates) => {
     onUpdateTournament(tournament.id, updates);
   };
+
+  // === LIVE SCORE (코트 태블릿 + 스코어보드 송출) ===
+  // 라이브 점수를 해당 매치 타입의 데이터 구조에 기록
+  // isLive=true → live:true, completed:false / isLive=false → live:false, completed:true
+  const writeLiveScore = (ctx, h, a, setScores, isLive) => {
+    const matchId = ctx.match.id;
+    const flags = isLive ? { live: true, completed: false } : { live: false, completed: true };
+    // RR/녹아웃: homeScore/awayScore + setScores
+    const applyRR = (m) => m.id === matchId ? { ...m, homeScore: h, awayScore: a, setScores: setScores || null, ...flags } : m;
+    // 아메리카노/스페셜: team1Score/team2Score
+    const applyAmer = (m) => m.id === matchId ? { ...m, team1Score: h, team2Score: a, ...flags } : m;
+
+    if (ctx.kind === "rr") {
+      const newGroups = groups.map((g, gi) => gi !== ctx.groupIdx ? g : {
+        ...g, rounds: g.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(applyRR)),
+      });
+      updateData({ groups: newGroups });
+    } else if (ctx.kind === "knockout") {
+      const bracket = { ...knockoutBracket };
+      bracket.rounds = bracket.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(applyRR));
+      // 결승(마지막 라운드 1경기) 종료 시 대회 완료 처리
+      if (!isLive) {
+        const lastRd = bracket.rounds[bracket.rounds.length - 1];
+        if (lastRd.length === 1 && lastRd[0].id === matchId && (!bracket.thirdPlaceMatch || bracket.thirdPlaceMatch.completed)) {
+          updateData({ knockoutBracket: bracket, stage: "completed" });
+          return;
+        }
+      }
+      updateData({ knockoutBracket: bracket });
+    } else if (ctx.kind === "thirdPlace") {
+      const bracket = { ...knockoutBracket };
+      bracket.thirdPlaceMatch = applyRR(bracket.thirdPlaceMatch);
+      updateData({ knockoutBracket: bracket });
+    } else if (ctx.kind === "americano") {
+      const data = { ...americanoData };
+      if (data.useGroups && ctx.groupIdx != null) {
+        const phase = data.phase === "final" ? "finalGroups" : data.phase === "stage2" ? "stage2Groups" : "groups";
+        data[phase] = data[phase].map((g, gi) => gi !== ctx.groupIdx ? g : {
+          ...g, rounds: g.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(applyAmer)),
+        });
+      } else {
+        data.rounds = data.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(applyAmer));
+      }
+      updateData({ americanoData: data });
+    } else if (ctx.kind === "special") {
+      const data = { ...specialData };
+      if (ctx.isFinalGroup) {
+        data.finalGroup = { ...data.finalGroup, rounds: data.finalGroup.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(applyAmer)) };
+      } else if (data.format === "selection-12") {
+        const phase = data.phase === "stage2" ? "stage2Groups" : "groups";
+        data[phase] = data[phase].map((g, gi) => gi !== ctx.groupIdx ? g : { ...g, rounds: g.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(applyAmer)) });
+      } else {
+        data.groups = data.groups.map((g, gi) => gi !== ctx.groupIdx ? g : { ...g, rounds: g.rounds.map((rd, ri) => ri !== ctx.roundIdx ? rd : rd.map(applyAmer)) });
+      }
+      updateData({ specialData: data });
+    }
+  };
+
+  const liveUpdate = (h, a, setScores) => {
+    if (liveMatch) writeLiveScore(liveMatch, h, a, setScores, true);
+  };
+  const liveEnd = (h, a, setScores) => {
+    if (liveMatch) writeLiveScore(liveMatch, h, a, setScores, false);
+    setLiveMatch(null);
+  };
+
+  // 경기 줄의 점수/컨트롤 영역 (완료 점수 / 🔴 라이브 / 점수입력)
+  const renderMatchControl = ({ m, a, b, onEditScore, liveCtx }) => {
+    const scoreText = `${a ?? 0} - ${b ?? 0}`;
+    if (m.completed) {
+      return (
+        <span
+          style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
+          onClick={() => isAdmin && onEditScore()}
+          title={isAdmin ? T("edit") : ""}
+        >{scoreText}</span>
+      );
+    }
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, marginLeft: 8 }}>
+        {m.live && <span style={{ fontWeight: 800, fontSize: 15, color: colors.danger }}>🔴 {scoreText}</span>}
+        <Btn size="sm" variant={m.live ? "danger" : "outline"} onClick={() => setLiveMatch(liveCtx())}>
+          {m.live ? T("broadcasting") : `🔴 ${T("live")}`}
+        </Btn>
+        {isAdmin && !m.live && <Btn size="sm" onClick={onEditScore}>{T("enterScore")}</Btn>}
+      </div>
+    );
+  };
+
+  // 라이브 점수 패널 (liveMatch 설정 시 표시) — 여러 return 분기에서 공통 사용
+  const _tournamentTitle = (tournament.specialName?.trim() || tournament.name || "");
+  const liveScorePanelEl = liveMatch ? (
+    <LiveScorePanel
+      match={liveMatch.match}
+      homeName={liveMatch.homeName}
+      awayName={liveMatch.awayName}
+      tournamentTitle={_tournamentTitle + (liveMatch.matchLabel ? " · " + liveMatch.matchLabel : "")}
+      matchLabel={liveMatch.matchLabel}
+      setMode={liveMatch.setMode}
+      onLiveUpdate={liveUpdate}
+      onEnd={liveEnd}
+      onClose={() => setLiveMatch(null)}
+      T={T}
+      lang={lang}
+    />
+  ) : null;
 
   // Start editing knockout matchups
   const startKnockoutEdit = () => {
@@ -4749,17 +5066,17 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                     <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
                     <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                   </div>
-                  {m.completed ? (
-                    <span
-                      style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
-                      onClick={() => isAdmin && setScoreModal({ type: "americano", roundIdx: ri, match: m, groupIdx })}
-                      title={isAdmin ? T("edit") : ""}
-                    >{m.team1Score} - {m.team2Score}</span>
-                  ) : isAdmin ? (
-                    <Btn size="sm" onClick={() => setScoreModal({ type: "americano", roundIdx: ri, match: m, groupIdx })}>{T("enterScore")}</Btn>
-                  ) : (
-                    <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
-                  )}
+                  {renderMatchControl({
+                    m, a: m.team1Score, b: m.team2Score,
+                    onEditScore: () => setScoreModal({ type: "americano", roundIdx: ri, match: m, groupIdx }),
+                    liveCtx: () => ({
+                      kind: "americano", match: m, roundIdx: ri, groupIdx,
+                      homeName: m.team1?.map((pid) => getTeamName(pid)).join(" & "),
+                      awayName: m.team2?.map((pid) => getTeamName(pid)).join(" & "),
+                      setMode: false,
+                      matchLabel: `${group.name}${lang === "ko" ? "조" : ""} · ${T("round")} ${ri + 1}`,
+                    }),
+                  })}
                 </div>
               ))}
             </div>
@@ -4971,6 +5288,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               T={T}
             />
           )}
+          {liveScorePanelEl}
         </div>
       );
     }
@@ -5035,17 +5353,17 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                     <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
                     <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                   </div>
-                  {m.completed ? (
-                    <span
-                      style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
-                      onClick={() => isAdmin && setScoreModal({ type: "americano", roundIdx: ri, match: m })}
-                      title={isAdmin ? T("edit") : ""}
-                    >{m.team1Score} - {m.team2Score}</span>
-                  ) : isAdmin ? (
-                    <Btn size="sm" onClick={() => setScoreModal({ type: "americano", roundIdx: ri, match: m })}>{T("enterScore")}</Btn>
-                  ) : (
-                    <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
-                  )}
+                  {renderMatchControl({
+                    m, a: m.team1Score, b: m.team2Score,
+                    onEditScore: () => setScoreModal({ type: "americano", roundIdx: ri, match: m }),
+                    liveCtx: () => ({
+                      kind: "americano", match: m, roundIdx: ri, groupIdx: undefined,
+                      homeName: m.team1?.map((pid) => getTeamName(pid)).join(" & "),
+                      awayName: m.team2?.map((pid) => getTeamName(pid)).join(" & "),
+                      setMode: false,
+                      matchLabel: `${T("round")} ${ri + 1}`,
+                    }),
+                  })}
                 </div>
               ))}
             </Card>
@@ -5074,6 +5392,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
             T={T}
           />
         )}
+        {liveScorePanelEl}
       </div>
     );
   }
@@ -5216,17 +5535,17 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                       <span style={{ color: colors.gray400, margin: "0 6px" }}>vs</span>
                       <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
                     </div>
-                    {m.completed ? (
-                      <span
-                        style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
-                        onClick={() => isAdmin && setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup })}
-                        title={isAdmin ? T("edit") : ""}
-                      >{m.team1Score} - {m.team2Score}</span>
-                    ) : isAdmin ? (
-                      <Btn size="sm" onClick={() => setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup })}>{T("enterScore")}</Btn>
-                    ) : (
-                      <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
-                    )}
+                    {renderMatchControl({
+                      m, a: m.team1Score, b: m.team2Score,
+                      onEditScore: () => setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup }),
+                      liveCtx: () => ({
+                        kind: "special", match: m, roundIdx: ri, groupIdx, isFinalGroup,
+                        homeName: m.team1?.map((pid) => getTeamName(pid)).join(" & "),
+                        awayName: m.team2?.map((pid) => getTeamName(pid)).join(" & "),
+                        setMode: false,
+                        matchLabel: `${isFinalGroup ? T("specialFinalRound") : group.name + (lang === "ko" ? "조" : "")} · ${T("round")} ${ri + 1}`,
+                      }),
+                    })}
                   </div>
                 ))}
               </div>
@@ -5382,17 +5701,17 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                 <span style={{ color: colors.gray400, margin: "0 4px" }}>vs</span>
                 <span>{m.team2?.map((pid) => getTeamName(pid)).join(" & ")}</span>
               </div>
-              {m.completed ? (
-                <span
-                  style={{ fontWeight: 700, fontSize: 15, flexShrink: 0, marginLeft: 8, cursor: isAdmin ? "pointer" : "default", padding: "2px 6px", borderRadius: 4 }}
-                  onClick={() => isAdmin && setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup: false })}
-                  title={isAdmin ? T("edit") : ""}
-                >{m.team1Score} - {m.team2Score}</span>
-              ) : isAdmin ? (
-                <Btn size="sm" onClick={() => setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup: false })}>{T("enterScore")}</Btn>
-              ) : (
-                <span style={{ color: colors.gray400, fontSize: 12 }}>-</span>
-              )}
+              {renderMatchControl({
+                m, a: m.team1Score, b: m.team2Score,
+                onEditScore: () => setScoreModal({ type: "special", roundIdx: ri, match: m, groupIdx, isFinalGroup: false }),
+                liveCtx: () => ({
+                  kind: "special", match: m, roundIdx: ri, groupIdx, isFinalGroup: false,
+                  homeName: m.team1?.map((pid) => getTeamName(pid)).join(" & "),
+                  awayName: m.team2?.map((pid) => getTeamName(pid)).join(" & "),
+                  setMode: false,
+                  matchLabel: `${groupLabel}${lang === "ko" ? "조" : ""} · ${T("round")} ${ri + 1}`,
+                }),
+              })}
             </div>
           );
           return (
@@ -5483,6 +5802,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
             T={T}
           />
         )}
+        {liveScorePanelEl}
       </div>
     );
   }
@@ -5670,17 +5990,32 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                             <span style={{ flexShrink: 0, marginRight: 4 }}><MatchSchedChip match={m} /></span>
                           )}
                           <span style={{ flex: 1, textAlign: "right", fontWeight: 500, fontSize: 13 }}>{getTeamName(m.home)}</span>
-                          {m.completed ? (
-                            <span style={{ padding: "0 16px", fontWeight: 700, fontSize: 15, cursor: isAdmin ? "pointer" : "default" }}
-                              onClick={() => isAdmin && setScoreModal({ type: "rr", groupIdx: gi, roundIdx: ri, match: m })}
-                            >{m.homeScore} - {m.awayScore}</span>
-                          ) : isAdmin ? (
-                            <span style={{ padding: "0 8px" }}>
-                              <Btn size="sm" variant="outline" onClick={() => setScoreModal({ type: "rr", groupIdx: gi, roundIdx: ri, match: m })}>{T("enterScore")}</Btn>
-                            </span>
-                          ) : (
-                            <span style={{ padding: "0 16px", color: colors.gray400 }}>vs</span>
-                          )}
+                          {(() => {
+                            const liveCtx = () => ({
+                              kind: "rr", match: m, roundIdx: ri, groupIdx: gi,
+                              homeName: getTeamName(m.home), awayName: getTeamName(m.away),
+                              setMode: false,
+                              matchLabel: `${group.name}${lang === "ko" ? "조" : ""} · ${T("match")} ${matchNum}`,
+                            });
+                            if (m.completed) {
+                              return (
+                                <span style={{ padding: "0 16px", fontWeight: 700, fontSize: 15, cursor: isAdmin ? "pointer" : "default" }}
+                                  onClick={() => isAdmin && setScoreModal({ type: "rr", groupIdx: gi, roundIdx: ri, match: m })}
+                                >{m.homeScore} - {m.awayScore}</span>
+                              );
+                            }
+                            return (
+                              <span style={{ padding: "0 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                                {m.live && <span style={{ fontWeight: 800, fontSize: 14, color: colors.danger }}>🔴 {m.homeScore ?? 0}-{m.awayScore ?? 0}</span>}
+                                <Btn size="sm" variant={m.live ? "danger" : "outline"} onClick={() => setLiveMatch(liveCtx())}>
+                                  {m.live ? T("broadcasting") : `🔴 ${T("live")}`}
+                                </Btn>
+                                {isAdmin && !m.live && (
+                                  <Btn size="sm" variant="outline" onClick={() => setScoreModal({ type: "rr", groupIdx: gi, roundIdx: ri, match: m })}>{T("enterScore")}</Btn>
+                                )}
+                              </span>
+                            );
+                          })()}
                           <span style={{ flex: 1, fontWeight: 500, fontSize: 13 }}>{getTeamName(m.away)}</span>
                         </div>
                       );
@@ -5729,7 +6064,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                 {m.setScores ? m.setScores.map((s, si) => (
                   <span key={si} style={{ fontSize: 12, fontWeight: s.h > s.a ? 700 : 400, color: s.h > s.a ? colors.primary : colors.gray400, minWidth: 14, textAlign: "center" }}>{s.h}</span>
                 )) : (
-                  <span style={{ fontWeight: 700, fontSize: 16 }}>{m.completed ? m.homeScore : ""}</span>
+                  <span style={{ fontWeight: 700, fontSize: 16 }}>{(m.completed || m.live) ? m.homeScore : ""}</span>
                 )}
               </div>
             </div>
@@ -5745,7 +6080,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                 {m.setScores ? m.setScores.map((s, si) => (
                   <span key={si} style={{ fontSize: 12, fontWeight: s.a > s.h ? 700 : 400, color: s.a > s.h ? colors.primary : colors.gray400, minWidth: 14, textAlign: "center" }}>{s.a}</span>
                 )) : (
-                  <span style={{ fontWeight: 700, fontSize: 16 }}>{m.completed ? m.awayScore : ""}</span>
+                  <span style={{ fontWeight: 700, fontSize: 16 }}>{(m.completed || m.live) ? m.awayScore : ""}</span>
                 )}
               </div>
             </div>
@@ -5755,6 +6090,21 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                 {m.court && <span>{m.court}</span>}
                 {m.court && m.matchTime && <span> | </span>}
                 {m.matchTime && <span>{m.matchTime}</span>}
+              </div>
+            )}
+            {/* Live score button (everyone) */}
+            {m.home && m.away && !m.completed && (
+              <div style={{ padding: "6px 12px", borderTop: `1px solid ${colors.gray100}` }}>
+                <Btn size="sm" variant={m.live ? "danger" : "outline"} style={{ width: "100%" }}
+                  onClick={() => setLiveMatch({
+                    kind: isThirdPlace ? "thirdPlace" : "knockout",
+                    match: m, roundIdx: ri,
+                    homeName: getTeamName(m.home), awayName: getTeamName(m.away),
+                    setMode: roundFormat === "set3" || roundFormat === "set2super",
+                    matchLabel: isThirdPlace ? T("thirdPlace") : (m.round || T("knockout")),
+                  })}>
+                  {m.live ? `📡 ${T("broadcasting")}` : `🔴 ${T("live")}`}
+                </Btn>
               </div>
             )}
             {/* Admin actions */}
@@ -5910,6 +6260,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
           T={T}
         />
       )}
+      {liveScorePanelEl}
     </div>
   );
 }

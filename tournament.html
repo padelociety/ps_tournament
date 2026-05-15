@@ -30,6 +30,7 @@ body {
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -48,6 +49,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 window.db = firebase.firestore();
 window.auth = firebase.auth();
+window.rtdb = firebase.database(); // ps-scoreboard 연동용 (Realtime DB)
 
 // 익명 로그인 (Firestore 쓰기 권한 확보)
 window.authReady = window.auth.signInAnonymously().catch((e) => {
