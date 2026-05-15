@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.8";
+const APP_VERSION = "6.9";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2343,13 +2343,13 @@ function NavBtn({ active, onClick, children }) {
 // ============================================================
 // MODAL
 // ============================================================
-function Modal({ onClose, children }) {
+function Modal({ onClose, children, maxWidth = 600 }) {
   return (
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 20 }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: colors.white, borderRadius: 16, maxWidth: 600, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+      <div style={{ background: colors.white, borderRadius: 16, maxWidth, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
         {children}
       </div>
     </div>
@@ -2574,8 +2574,8 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
 
   const counterBtn = (label, onClick, bg) => (
     <button onClick={onClick} style={{
-      width: "100%", padding: "18px 0", fontSize: 32, fontWeight: 800,
-      border: "none", borderRadius: 12, cursor: "pointer",
+      width: "100%", padding: "36px 0", fontSize: 56, fontWeight: 800,
+      border: "none", borderRadius: 16, cursor: "pointer",
       background: bg, color: colors.white, lineHeight: 1,
       WebkitTapHighlightColor: "transparent", userSelect: "none",
     }}>{label}</button>
@@ -2583,14 +2583,14 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
 
   const teamPanel = (side, name, game) => (
     <div style={{ flex: 1, textAlign: "center", padding: 8 }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color: colors.gray800, marginBottom: 8, minHeight: 40, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: colors.gray800, marginBottom: 12, minHeight: 56, display: "flex", alignItems: "center", justifyContent: "center" }}>
         {name}
       </div>
       <div style={{
-        fontSize: 72, fontWeight: 900, color: colors.primary, lineHeight: 1,
-        margin: "8px 0 14px", fontFamily: "monospace",
+        fontSize: 160, fontWeight: 900, color: colors.primary, lineHeight: 1,
+        margin: "12px 0 22px", fontFamily: "monospace",
       }}>{game}</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {counterBtn("+1", () => chGame(side, 1), colors.primary)}
         {counterBtn("−1", () => chGame(side, -1), colors.gray400)}
       </div>
@@ -2598,15 +2598,15 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
   );
 
   return (
-    <Modal onClose={onClose}>
-      <div style={{ padding: 20 }}>
+    <Modal onClose={onClose} maxWidth={900}>
+      <div style={{ padding: 28 }}>
         {/* 헤더 */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <h3 style={{ fontSize: 17, fontWeight: 800, color: colors.gray800, margin: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <h3 style={{ fontSize: 22, fontWeight: 800, color: colors.gray800, margin: 0 }}>
             🔴 {T("liveScore")}
           </h3>
           <button onClick={() => setBroadcasting((b) => !b)} style={{
-            padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: "pointer",
+            padding: "10px 18px", borderRadius: 24, fontSize: 14, fontWeight: 700, cursor: "pointer",
             border: `2px solid ${broadcasting ? colors.danger : colors.gray300}`,
             background: broadcasting ? colors.danger : colors.white,
             color: broadcasting ? colors.white : colors.gray500,
@@ -2614,15 +2614,15 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
             {broadcasting ? `📡 ${T("broadcasting")}` : T("broadcastOff")}
           </button>
         </div>
-        {matchLabel && <p style={{ fontSize: 12, color: colors.gray500, margin: "0 0 12px" }}>{matchLabel}</p>}
+        {matchLabel && <p style={{ fontSize: 14, color: colors.gray500, margin: "0 0 16px" }}>{matchLabel}</p>}
 
         {/* 완료된 세트 (set mode) */}
         {setMode && completedSets.length > 0 && (
-          <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 14, flexWrap: "wrap" }}>
             {completedSets.map((s, i) => (
               <span key={i} style={{
-                padding: "4px 10px", borderRadius: 8, background: colors.gray100,
-                fontSize: 13, fontWeight: 700, color: colors.gray700,
+                padding: "6px 14px", borderRadius: 10, background: colors.gray100,
+                fontSize: 16, fontWeight: 700, color: colors.gray700,
               }}>
                 {lang === "ko" ? `${i + 1}세트` : `Set ${i + 1}`} {s.h}-{s.a}
               </span>
@@ -2631,20 +2631,20 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
         )}
 
         {/* 카운터 */}
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
           {teamPanel("a", homeName, gameA)}
-          <div style={{ alignSelf: "center", fontSize: 24, fontWeight: 700, color: colors.gray300, paddingTop: 40 }}>:</div>
+          <div style={{ alignSelf: "center", fontSize: 48, fontWeight: 700, color: colors.gray300, paddingTop: 100 }}>:</div>
           {teamPanel("b", awayName, gameB)}
         </div>
 
         {/* set mode 컨트롤 */}
         {setMode && (
-          <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "center" }}>
-            <Btn size="sm" variant="outline" onClick={addSet}>
-              <Icon name="plus" size={14} />{T("nextSet")}
+          <div style={{ display: "flex", gap: 10, marginTop: 20, justifyContent: "center" }}>
+            <Btn variant="outline" onClick={addSet}>
+              <Icon name="plus" size={16} />{T("nextSet")}
             </Btn>
             <button onClick={() => setSuperTB((v) => !v)} style={{
-              padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer",
+              padding: "8px 16px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer",
               border: `2px solid ${superTB ? colors.warning : colors.gray300}`,
               background: superTB ? colors.warning : colors.white,
               color: superTB ? colors.white : colors.gray500,
@@ -2655,14 +2655,14 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
         )}
 
         {/* 하단 버튼 */}
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 20, flexWrap: "wrap" }}>
-          <Btn variant="outline" onClick={onClose}>{T("cancel")}</Btn>
+        <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
+          <Btn size="lg" variant="outline" onClick={onClose}>{T("cancel")}</Btn>
           {isAdmin && onCancel && (
-            <Btn variant="outline" onClick={onCancel} style={{ borderColor: colors.danger, color: colors.danger }}>
+            <Btn size="lg" variant="outline" onClick={onCancel} style={{ borderColor: colors.danger, color: colors.danger }}>
               {lang === "ko" ? "라이브 취소(초기화)" : "Cancel Live (Reset)"}
             </Btn>
           )}
-          <Btn variant="danger" onClick={handleEnd}>{T("endMatch")}</Btn>
+          <Btn size="lg" variant="danger" onClick={handleEnd}>{T("endMatch")}</Btn>
         </div>
       </div>
     </Modal>
