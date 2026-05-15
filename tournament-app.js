@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.7";
+const APP_VERSION = "6.8";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -6156,8 +6156,19 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
         const thirdMatch = knockoutBracket.thirdPlaceMatch;
         const allKnockoutDone = isFinalDone && (!thirdMatch || thirdMatch.completed);
 
+        // 라운드 크기 + 매치 인덱스로 영문 라운드 라벨 생성 (스코어보드 송출용)
+        const knockoutEnLabel = (size, mi, isThirdPlace) => {
+          if (isThirdPlace) return "3rd Place";
+          if (size === 1) return "Final";
+          if (size === 2) return `Semi ${mi + 1}`;
+          if (size === 4) return `Quarter ${mi + 1}`;
+          if (size === 8) return `R16 ${mi + 1}`;
+          if (size === 16) return `R32 ${mi + 1}`;
+          return `Round ${mi + 1}`;
+        };
+
         // Helper to render a single match card
-        const MatchCard = ({ m, ri, roundFormat, isThirdPlace }) => (
+        const MatchCard = ({ m, ri, mi, roundSize, roundFormat, isThirdPlace }) => (
           <div style={{
             border: `1px solid ${colors.gray200}`, borderRadius: 10, overflow: "hidden",
             background: colors.white, minWidth: 220, boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
@@ -6211,7 +6222,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                     match: m, roundIdx: ri,
                     homeName: getTeamName(m.home), awayName: getTeamName(m.away),
                     setMode: roundFormat === "set3" || roundFormat === "set2super",
-                    title: buildLiveTitle({ groupName: null, groupCount: 1, unitLabel: isThirdPlace ? "3rd Place" : (m.round || "Knockout") }),
+                    title: buildLiveTitle({ groupName: null, groupCount: 1, unitLabel: knockoutEnLabel(roundSize, mi, isThirdPlace) }),
                   })}>
                   {m.live ? `📡 ${T("broadcasting")}` : `🔴 ${T("live")}`}
                 </Btn>
@@ -6311,8 +6322,8 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
                       <span style={{ fontSize: 13, fontWeight: 700, color: colors.primary }}>{roundLabel}</span>
                       {roundFormat && <div style={{ fontSize: 11, color: colors.gray400 }}>{T(roundFormat)}</div>}
                     </div>
-                    {round.map((m) => (
-                      <MatchCard key={m.id} m={m} ri={ri} roundFormat={roundFormat} />
+                    {round.map((m, mi) => (
+                      <MatchCard key={m.id} m={m} ri={ri} mi={mi} roundSize={round.length} roundFormat={roundFormat} />
                     ))}
                   </div>
                 );
