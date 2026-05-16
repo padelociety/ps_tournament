@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "6.9";
+const APP_VERSION = "7.0";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -666,90 +666,95 @@ const calcPlayerRankings = (entries, filters, players) => {
 const calcTournamentResults = (tournament) => {
   const results = []; // { playerName, resultIdx }
   const regs = tournament.registrations || [];
-  const getName = (id) => {
-    const r = regs.find((r) => r.id === id);
-    return r ? (r.teamName || r.playerName) : null;
-  };
   const getPlayerNames = (id) => {
     const r = regs.find((r) => r.id === id);
     if (!r) return [];
     return r.partnerName ? [r.playerName, r.partnerName] : [r.playerName];
   };
-
+  // 라운드 사이즈로 라운드 식별 (rounds[length-1]가 항상 결승은 아님 — 진행 중일 수도)
   const kb = tournament.knockoutBracket;
-  if (kb && kb.rounds.length > 0) {
-    const finalRound = kb.rounds[kb.rounds.length - 1];
-    const semiRound = kb.rounds.length >= 2 ? kb.rounds[kb.rounds.length - 2] : null;
-    const qfRound = kb.rounds.length >= 3 ? kb.rounds[kb.rounds.length - 3] : null;
+  const finalMatch = kb?.rounds?.find((r) => r.length === 1)?.[0];
+  const semiRound = kb?.rounds?.find((r) => r.length === 2);
+  const qfRound = kb?.rounds?.find((r) => r.length === 4);
+  const r16Round = kb?.rounds?.find((r) => r.length === 8);
+  const r32Round = kb?.rounds?.find((r) => r.length === 16);
+  const knockoutCompleted = !!finalMatch?.completed;
 
-    // Final → W(0), F(1)
-    finalRound.forEach((m) => {
-      if (m.completed) {
-        const winnerId = m.homeScore > m.awayScore ? m.home : m.away;
-        const loserId = m.homeScore > m.awayScore ? m.away : m.home;
-        getPlayerNames(winnerId).forEach((n) => results.push({ playerName: n, resultIdx: 0 }));
-        getPlayerNames(loserId).forEach((n) => results.push({ playerName: n, resultIdx: 1 }));
-      }
-    });
+  // ── Case 1: 녹아웃 결승까지 완료된 정상 케이스 ───────────────────
+  if (knockoutCompleted) {
+    const winnerId = finalMatch.homeScore > finalMatch.awayScore ? finalMatch.home : finalMatch.away;
+    const loserId = finalMatch.homeScore > finalMatch.awayScore ? finalMatch.away : finalMatch.home;
+    const added = new Set();
+    const add = (id, idx) => {
+      getPlayerNames(id).forEach((n) => {
+        if (!added.has(n)) { results.push({ playerName: n, resultIdx: idx }); added.add(n); }
+      });
+    };
+    add(winnerId, 0);
+    add(loserId, 1);
 
-    // 3rd place match
+    // SF: 3·4위전 진행했으면 그 두 선수, 아니면 SF 패자
     if (kb.thirdPlaceMatch?.completed) {
-      const winnerId = kb.thirdPlaceMatch.homeScore > kb.thirdPlaceMatch.awayScore ? kb.thirdPlaceMatch.home : kb.thirdPlaceMatch.away;
-      const loserId = kb.thirdPlaceMatch.homeScore > kb.thirdPlaceMatch.awayScore ? kb.thirdPlaceMatch.away : kb.thirdPlaceMatch.home;
-      // Winner of 3rd place match gets SF points (idx 2), loser gets SF too (both are 4강)
-      // Actually per the table, SF losers get SF points. The 3rd place winner doesn't get extra.
-      // But since they already got SF from the semi loss, we skip if already added.
-      const alreadyAdded = new Set(results.map((r) => r.playerName));
-      getPlayerNames(winnerId).forEach((n) => { if (!alreadyAdded.has(n)) results.push({ playerName: n, resultIdx: 2 }); });
-      getPlayerNames(loserId).forEach((n) => { if (!alreadyAdded.has(n)) results.push({ playerName: n, resultIdx: 2 }); });
+      add(kb.thirdPlaceMatch.home, 2);
+      add(kb.thirdPlaceMatch.away, 2);
     } else if (semiRound) {
-      // Semi losers → SF(2)
-      const alreadyAdded = new Set(results.map((r) => r.playerName));
       semiRound.forEach((m) => {
         if (m.completed) {
-          const loserId = m.homeScore > m.awayScore ? m.away : m.home;
-          getPlayerNames(loserId).forEach((n) => { if (!alreadyAdded.has(n)) results.push({ playerName: n, resultIdx: 2 }); });
+          const sl = m.homeScore > m.awayScore ? m.away : m.home;
+          add(sl, 2);
         }
       });
     }
+    // QF/R16/R32 패자
+    if (qfRound) qfRound.forEach((m) => { if (m.completed) add(m.homeScore > m.awayScore ? m.away : m.home, 3); });
+    if (r16Round) r16Round.forEach((m) => { if (m.completed) add(m.homeScore > m.awayScore ? m.away : m.home, 4); });
+    if (r32Round) r32Round.forEach((m) => { if (m.completed) add(m.homeScore > m.awayScore ? m.away : m.home, 5); });
 
-    // QF losers → QF(3)
-    if (qfRound) {
-      const alreadyAdded = new Set(results.map((r) => r.playerName));
-      qfRound.forEach((m) => {
-        if (m.completed) {
-          const loserId = m.homeScore > m.awayScore ? m.away : m.home;
-          getPlayerNames(loserId).forEach((n) => { if (!alreadyAdded.has(n)) results.push({ playerName: n, resultIdx: 3 }); });
-        }
-      });
-    }
-    // RR eliminated players (didn't advance to knockout)
-    // If knockout starts at SF(idx2), eliminated = QF(idx3)
-    // If knockout starts at QF(idx3), eliminated = R16(idx4)
-    const knockoutStartIdx = kb.rounds[0].length <= 2 ? 2 : 3; // 2 matches=SF, 4 matches=QF
-    const eliminatedIdx = knockoutStartIdx + 1;
+    // RR에서 녹아웃 진출 못한 선수 — 녹아웃 첫 라운드보다 한 단계 아래
     if (tournament.groups) {
-      const knockoutPlayerNames = new Set(results.map((r) => r.playerName));
+      const firstKnockoutSize = Math.max(...kb.rounds.map((r) => r.length));
+      // SF부터 시작(2): 탈락=QF(3) / QF부터(4): 탈락=R16(4) / R16부터(8): 탈락=R32(5)
+      const elimByStart = { 2: 3, 4: 4, 8: 5, 16: 5 };
+      const elimIdx = elimByStart[firstKnockoutSize] ?? 5;
       tournament.groups.forEach((g) => {
         g.teams.forEach((t) => {
           getPlayerNames(t.id).forEach((n) => {
-            if (!knockoutPlayerNames.has(n)) {
-              results.push({ playerName: n, resultIdx: eliminatedIdx });
-            }
+            if (!added.has(n)) { results.push({ playerName: n, resultIdx: elimIdx }); added.add(n); }
           });
         });
       });
     }
-  } else if (tournament.type === "league" && tournament.groups) {
-    // League: rank by standings
-    const group = tournament.groups[0];
-    if (group) {
-      const standings = calcStandings(group.teams, group.rounds);
-      standings.forEach((s, i) => {
-        const idx = i === 0 ? 0 : i === 1 ? 1 : i <= 3 ? 2 : 3;
-        getPlayerNames(s.team.id).forEach((n) => results.push({ playerName: n, resultIdx: idx }));
+    return results;
+  }
+
+  // ── Case 2: 녹아웃 결승 미완료 (또는 녹아웃 자체 없음) → RR 순위로 환산 ──
+  // "대회 종료"를 녹아웃 끝나기 전에 누른 경우 등
+  if (tournament.groups && tournament.groups.length > 0) {
+    const allStandings = [];
+    tournament.groups.forEach((g) => {
+      const st = calcStandings(g.teams, g.rounds);
+      st.forEach((s) => allStandings.push(s));
+    });
+    // 종합 순위: 포인트 → 승수 → 게임 차
+    allStandings.sort((a, b) => {
+      if ((b.points || 0) !== (a.points || 0)) return (b.points || 0) - (a.points || 0);
+      if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
+      return ((b.gamesWon || 0) - (b.gamesLost || 0)) - ((a.gamesWon || 0) - (a.gamesLost || 0));
+    });
+    const added = new Set();
+    allStandings.forEach((s, i) => {
+      let idx;
+      if (i === 0) idx = 0;        // W
+      else if (i === 1) idx = 1;   // F
+      else if (i <= 3) idx = 2;    // SF (3-4위)
+      else if (i <= 7) idx = 3;    // QF (5-8위)
+      else if (i <= 15) idx = 4;   // R16 (9-16위)
+      else idx = 5;                // R32
+      getPlayerNames(s.team.id).forEach((n) => {
+        if (!added.has(n)) { results.push({ playerName: n, resultIdx: idx }); added.add(n); }
       });
-    }
+    });
+    return results;
   }
 
   return results;
