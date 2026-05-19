@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "7.0";
+const APP_VERSION = "7.1";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2365,12 +2365,13 @@ function Modal({ onClose, children, maxWidth = 600 }) {
 // GROUP DRAW ANIMATION MODAL
 // ============================================================
 function GroupDrawAnimationModal({ teams, groups, onConfirm, onCancel, lang }) {
-  // 추첨 순서: 두 조의 팀을 번갈아서 한 명씩 (드라마틱 연출)
+  const singleGroup = groups.length === 1;
+  // 추첨 순서: 단일 조면 순서대로, 여러 조면 번갈아서 (드라마틱 연출)
   const revealOrder = [];
   const maxLen = Math.max(...groups.map((g) => g.teams.length));
   for (let i = 0; i < maxLen; i++) {
-    groups.forEach((g) => {
-      if (g.teams[i]) revealOrder.push({ team: g.teams[i], groupName: g.name });
+    groups.forEach((g, gi) => {
+      if (g.teams[i]) revealOrder.push({ team: g.teams[i], groupName: g.name, groupIdx: gi, posInGroup: i });
     });
   }
 
@@ -2425,7 +2426,7 @@ function GroupDrawAnimationModal({ teams, groups, onConfirm, onCancel, lang }) {
       `}</style>
       <div style={{ padding: 24, minWidth: 320 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, textAlign: "center", marginBottom: 16, color: colors.gray800 }}>
-          🎱 {lang === "ko" ? "조 추첨" : "Group Draw"}
+          🎱 {singleGroup ? (lang === "ko" ? "팀 순서 추첨" : "Draw Order") : (lang === "ko" ? "조 추첨" : "Group Draw")}
         </h2>
 
         {phase === "spinning" && (
@@ -2456,7 +2457,9 @@ function GroupDrawAnimationModal({ teams, groups, onConfirm, onCancel, lang }) {
               {currentReveal.team.name}
             </div>
             <div style={{ fontSize: 26, fontWeight: 800, color: colors.primary, marginTop: 6, animation: "drawPulse 0.6s ease-in-out infinite" }}>
-              → {currentReveal.groupName}{lang === "ko" ? "조" : ""}
+              {singleGroup
+                ? `→ #${currentReveal.posInGroup + 1}`
+                : `→ ${currentReveal.groupName}${lang === "ko" ? "조" : ""}`}
             </div>
           </div>
         )}
@@ -2477,16 +2480,19 @@ function GroupDrawAnimationModal({ teams, groups, onConfirm, onCancel, lang }) {
             {groupBuckets.map((g) => (
               <div key={g.name} style={{ background: colors.gray50, borderRadius: 12, padding: 10, minHeight: 80 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: colors.primary, marginBottom: 8, textAlign: "center" }}>
-                  {g.name}{lang === "ko" ? "조" : " Group"} <span style={{ fontSize: 12, color: colors.gray400 }}>({g.items.length})</span>
+                  {singleGroup
+                    ? (lang === "ko" ? `추첨 결과 (${g.items.length})` : `Order (${g.items.length})`)
+                    : <>{g.name}{lang === "ko" ? "조" : " Group"} <span style={{ fontSize: 12, color: colors.gray400 }}>({g.items.length})</span></>}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {g.items.map((t, ti) => (
                     <div key={t.id} style={{
                       padding: "6px 8px", background: colors.white, borderRadius: 6,
-                      fontSize: 13, fontWeight: 600, color: colors.gray800,
+                      fontSize: 13, fontWeight: 600, color: colors.gray800, display: "flex", alignItems: "center", gap: 8,
                       animation: ti === g.items.length - 1 && phase === "revealing" ? "drawSlide 0.4s ease-out" : undefined,
                     }}>
-                      {t.name}
+                      {singleGroup && <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, color: colors.gray400, minWidth: 22 }}>#{ti + 1}</span>}
+                      <span>{t.name}</span>
                     </div>
                   ))}
                 </div>
@@ -3560,7 +3566,17 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
     if (type === "open") {
       const maxT = parseInt(tournament.maxTeams);
       if (maxT === 4 || maxT === 5) {
-        result.groups = [{ name: "A", teams: teamsWithSeed, rounds: generateRoundRobinSchedule(teamsWithSeed) }];
+        // 시드가 있으면 시드 순서대로, 없으면 랜덤 셔플
+        const hasSeeds = teamsWithSeed.some((t) => t.seed);
+        let ordered;
+        if (hasSeeds) {
+          const seeded = teamsWithSeed.filter((t) => t.seed).sort((a, b) => a.seed - b.seed);
+          const unseeded = teamsWithSeed.filter((t) => !t.seed).sort(() => Math.random() - 0.5);
+          ordered = [...seeded, ...unseeded];
+        } else {
+          ordered = [...teamsWithSeed].sort(() => Math.random() - 0.5);
+        }
+        result.groups = [{ name: "A", teams: ordered, rounds: generateRoundRobinSchedule(ordered) }];
       } else if (maxT === 8 || maxT === 10) {
         const numGroups = 2;
         const seededGroups = applySnakeSeeding(teamsWithSeed, numGroups);
@@ -3600,7 +3616,7 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
 
 
   
-  const needsGroupDraw = (type, maxT) => type === "open" && (maxT === 8 || maxT === 10);
+  const needsGroupDraw = (type, maxT) => type === "open" && (maxT === 4 || maxT === 5 || maxT === 8 || maxT === 10);
 
   const startTournament = () => {
     let updates = { stage: "ongoing" };
@@ -3656,8 +3672,8 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
   const doGroupDraw = () => {
     const teams = confirmedRegs.map((r) => ({ id: r.id, name: r.teamName || r.playerName }));
     const data = generateBracketForTeams(teams, tournament.type);
-    if (data.groups && data.groups.length >= 2) {
-      // 추첨 애니메이션 표시
+    if (data.groups && data.groups.length >= 1) {
+      // 추첨 애니메이션 표시 (단일 조여도 순서 추첨 의미가 있음)
       setDrawAnimation({ teams, data });
     } else {
       // 그룹 없는 타입 (cup, league 등)은 즉시 적용
@@ -5926,7 +5942,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
   // Check if any RR match has been played (to prevent re-draw after scores entered)
   const anyRRPlayed = groups?.some((g) => g.rounds.some((round) => round.some((m) => m.completed)));
   // Can re-draw: groups exist but no scores entered yet, and multiple groups
-  const canRedraw = groups && groups.length >= 2 && !anyRRPlayed && !knockoutBracket;
+  const canRedraw = groups && groups.length >= 1 && !anyRRPlayed && !knockoutBracket;
 
   // Confirmed registrations for group draw
   const confirmedForDraw = tournament.registrations?.filter((r) => r.status === "confirmed") || [];
@@ -5951,17 +5967,21 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
           {!manualMode ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <p style={{ fontSize: 14, color: colors.gray600, margin: 0 }}>
-                {lang === "ko" ? `${confirmedForDraw.length}개 팀이 준비되었습니다. 조 추첨을 하거나 직접 배정할 수 있습니다.` : `${confirmedForDraw.length} teams ready. You can auto-draw groups or assign manually.`}
+                {lang === "ko"
+                  ? (maxT <= 5 ? `${confirmedForDraw.length}개 팀이 준비되었습니다. 추첨해서 경기 순서를 정하세요.` : `${confirmedForDraw.length}개 팀이 준비되었습니다. 조 추첨을 하거나 직접 배정할 수 있습니다.`)
+                  : (maxT <= 5 ? `${confirmedForDraw.length} teams ready. Draw to set match order.` : `${confirmedForDraw.length} teams ready. You can auto-draw groups or assign manually.`)}
               </p>
               <div style={{ display: "flex", gap: 10 }}>
                 <Btn variant="success" onClick={onGroupDraw}>{T("generateGroupsDraw")}</Btn>
-                <Btn variant="outline" onClick={() => {
-                  setManualMode(true);
-                  // Initialize assignments
-                  const init = {};
-                  confirmedForDraw.forEach((r) => { init[r.id] = ""; });
-                  setGroupAssign(init);
-                }}>{T("manualGroupAssign")}</Btn>
+                {maxT > 5 && (
+                  <Btn variant="outline" onClick={() => {
+                    setManualMode(true);
+                    // Initialize assignments
+                    const init = {};
+                    confirmedForDraw.forEach((r) => { init[r.id] = ""; });
+                    setGroupAssign(init);
+                  }}>{T("manualGroupAssign")}</Btn>
+                )}
               </div>
             </div>
           ) : (
@@ -6013,13 +6033,15 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               {isAdmin && canRedraw && (
                 <>
                   <Btn size="sm" variant="outline" onClick={onGroupDraw}>{lang === "ko" ? "다시 추첨" : "Re-draw"}</Btn>
-                  <Btn size="sm" variant="outline" onClick={() => {
-                    setManualMode(true);
-                    const init = {};
-                    // Pre-fill current assignments
-                    groups.forEach((g) => g.teams.forEach((t) => { init[t.id] = g.name; }));
-                    setGroupAssign(init);
-                  }}>{T("manualGroupAssign")}</Btn>
+                  {maxT > 5 && (
+                    <Btn size="sm" variant="outline" onClick={() => {
+                      setManualMode(true);
+                      const init = {};
+                      // Pre-fill current assignments
+                      groups.forEach((g) => g.teams.forEach((t) => { init[t.id] = g.name; }));
+                      setGroupAssign(init);
+                    }}>{T("manualGroupAssign")}</Btn>
+                  )}
                 </>
               )}
               {isAdmin && allRRDone && !knockoutBracket && tournament.type === "open" && (
