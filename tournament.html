@@ -27,34 +27,20 @@ body {
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/blueimp-md5/2.19.0/js/md5.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
 <script>
-// Firebase 초기화
-const firebaseConfig = {
-  apiKey: "AIzaSyBkrib1qzN8IE9NcW8tXTfKb4Z6JsOjcvE",
-  authDomain: "ps-score-868bb.firebaseapp.com",
-  databaseURL: "https://ps-score-868bb-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "ps-score-868bb",
-  storageBucket: "ps-score-868bb.firebasestorage.app",
-  messagingSenderId: "48470302084",
-  appId: "1:48470302084:web:b037acc0b58f7e85d191d1",
-  measurementId: "G-809MEV8RME"
-};
-firebase.initializeApp(firebaseConfig);
-window.db = firebase.firestore();
-window.auth = firebase.auth();
-window.rtdb = firebase.database(); // ps-scoreboard 연동용 (Realtime DB)
-
-// 익명 로그인 (Firestore 쓰기 권한 확보)
-window.authReady = window.auth.signInAnonymously().catch((e) => {
-  console.error("Anonymous auth failed:", e);
-});
+// ──────────────────────────────────────────────────────────
+// Playus 백엔드 어댑터 (B 단계 — Firebase Firestore 대체).
+// 데이터는 Playus MongoDB tournament-store 컬렉션에 저장.
+// same-origin 프록시(/api → 백엔드)라 CORS 불필요.
+// ──────────────────────────────────────────────────────────
+window.PS_API_BASE = "/api/tournament-store";
+window.db = null;        // Firestore 미사용 (어댑터가 대체)
+window.rtdb = null;      // Realtime DB 미사용
+window.authReady = Promise.resolve(); // 익명 인증 불필요
 
 // React hooks를 전역으로 노출
 const { useState, useEffect, useCallback, useRef, createContext, useContext } = React;

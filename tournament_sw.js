@@ -1,4 +1,4 @@
-const CACHE_NAME = "ps-tournament-v63";
+const CACHE_NAME = "ps-tournament-v68";
 const OWN_ASSETS = [
   "./tournament.html",
   "./tournament-app.js",
@@ -44,6 +44,16 @@ self.addEventListener("message", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
+
+  // API 요청(/api/...)은 SW가 절대 가로채지 않음 — POST/PUT body 유실 + stale 캐시 방지.
+  if (url.pathname.startsWith("/api/")) {
+    return; // 브라우저 기본 네트워크 처리에 위임
+  }
+  // GET 외 메서드(POST/PUT/PATCH/DELETE)도 가로채지 않음 (Cache API는 GET만 지원)
+  if (e.request.method !== "GET") {
+    return;
+  }
+
   const isOwnAsset = url.origin === self.location.origin;
 
   if (isOwnAsset) {

@@ -490,29 +490,85 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 // ============================================================
 // FIRESTORE HELPERS (Firestore 전용 — localStorage 사용하지 않음)
 // ============================================================
-const fsDb = window.db;
+const fsDb = window.db; // null — Playus 어댑터 사용
 const FS_COLLECTION = "appData";
+const PS_API = window.PS_API_BASE || "/api/tournament-store";
+const PS_API_ROOT = window.PS_API_ROOT || "/api"; // 로그인/센터/코트 등
 
+// Playus JWT — 로그인 후 저장. localStorage 영속.
+const psGetToken = () => window.PS_AUTH_TOKEN || localStorage.getItem("ps_token") || "";
+const psSetAuth = (token, user) => {
+  window.PS_AUTH_TOKEN = token || "";
+  window.PS_USER = user || null;
+  if (token) localStorage.setItem("ps_token", token); else localStorage.removeItem("ps_token");
+  if (user) localStorage.setItem("ps_user", JSON.stringify(user)); else localStorage.removeItem("ps_user");
+};
+const psGetUser = () => {
+  if (window.PS_USER) return window.PS_USER;
+  try { return JSON.parse(localStorage.getItem("ps_user") || "null"); } catch { return null; }
+};
+// API 호출 헤더 — Playus 인증 토큰 포함
+const psHeaders = (extra) => {
+  const h = { Accept: "application/json", ...(extra || {}) };
+  const t = psGetToken();
+  if (t) h.Authorization = "Bearer " + t;
+  return h;
+};
+
+// Playus 토큰 자동 갱신 — 만료(433) 시 /refreshToken으로 새 토큰 발급.
+// 백엔드 refreshToken은 ignoreExpiration:true라 만료 토큰의 시그니처만 검증 → 재로그인 불필요.
+const psRefreshToken = async () => {
+  const user = psGetUser();
+  const tok = psGetToken();
+  if (!user || !user._id || !tok) return false;
+  try {
+    const res = await fetch(`${PS_API_ROOT}/refreshToken`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + tok },
+      body: JSON.stringify({ userId: user._id }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && json.isSuccess && json.data && json.data.token) {
+      psSetAuth(json.data.token, user);
+      return true;
+    }
+  } catch (e) { /* 네트워크 오류 — 갱신 실패로 처리 */ }
+  return false;
+};
+
+// 인증 필요한 호출 — 433(토큰 만료) 받으면 1회 자동 갱신 후 재시도.
+// 갱신까지 실패하면(세션 만료) 토큰 비우고 ps-auth-expired 이벤트 발생 → 재로그인 모달.
+// 헤더는 매번 psHeaders로 새로 만들어 재시도 시 갱신된 토큰이 자동 반영되게 한다.
+const psAuthedFetch = async (path, opts) => {
+  opts = opts || {};
+  let res = await fetch(path, { ...opts, headers: psHeaders(opts.headers) });
+  if (res.status === 433) {
+    const refreshed = await psRefreshToken();
+    if (refreshed) {
+      res = await fetch(path, { ...opts, headers: psHeaders(opts.headers) });
+    }
+  }
+  if (res.status === 433 || res.status === 401) {
+    psSetAuth(null, null);
+    window.dispatchEvent(new Event("ps-auth-expired"));
+  }
+  return res;
+};
+
+// Playus REST 어댑터 — Firestore loadFromFirestore 대체.
+// 반환: { items, updatedAt } 또는 null (구 인터페이스 호환).
 const loadFromFirestore = async (docId) => {
   try {
-    if (!fsDb) return null;
-    const doc = await fsDb.collection(FS_COLLECTION).doc(docId).get();
-    if (doc.exists) {
-      const raw = doc.data();
-      // 새 형식 (JSON 문자열) 또는 구 형식 (items 배열) 모두 지원
-      let items;
-      if (raw.data) {
-        items = JSON.parse(raw.data);
-      } else if (raw.items) {
-        items = raw.items;
-      } else {
-        items = [];
-      }
-      return { items, updatedAt: raw.updatedAt || null };
-    }
-    return null;
+    const res = await fetch(`${PS_API}/${docId}`, { headers: psHeaders() });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const payload = json.data || {};
+    if (payload.data == null) return null;
+    let items;
+    try { items = JSON.parse(payload.data); } catch { items = []; }
+    return { items, updatedAt: payload.updatedAt || null };
   } catch (e) {
-    console.error("Firestore load error (" + docId + "):", e);
+    console.error("Playus load error (" + docId + "):", e);
     return null;
   }
 };
@@ -534,14 +590,25 @@ const showSaveStatus = (msg, isError) => {
   setTimeout(() => { status.style.opacity = "0"; }, 2000);
 };
 
+// Playus REST 어댑터 — Firestore saveToFirestore 대체.
+// 저장 후 폴링이 자기 변경을 다시 받아 깜빡이지 않도록 lastKnownVersion 갱신.
 const saveToFirestore = async (docId, list) => {
   try {
-    if (!fsDb) { showSaveStatus("DB 연결 안됨!", true); return false; }
-    // Firestore는 중첩 배열을 지원하지 않으므로 JSON 문자열로 저장
-    await fsDb.collection(FS_COLLECTION).doc(docId).set({
-      data: JSON.stringify(list),
-      updatedAt: new Date().toISOString()
+    const res = await psAuthedFetch(`${PS_API}/${docId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: JSON.stringify(list) }),
     });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      const expired = res.status === 433 || res.status === 401;
+      showSaveStatus(expired ? "✗ 세션 만료 — 다시 로그인하세요" : ("✗ 저장 실패: " + res.status), true);
+      console.error("[save] FAILED:", res.status, txt);
+      return false;
+    }
+    const json = await res.json();
+    const ua = json.data && json.data.updatedAt;
+    if (ua && window.__psStoreVersions) window.__psStoreVersions[docId] = ua;
     showSaveStatus("✓ 저장 완료");
     return true;
   } catch (e) {
@@ -558,7 +625,7 @@ const saveToFirestore = async (docId, list) => {
 // 데이터 모양: { title, a:{name,game,point,sets,serving}, b:{...}, superTB }
 const pushToScoreboard = (payload) => {
   try {
-    if (!window.rtdb) return;
+    if (!window.rtdb) return; // Playus 어댑터에선 RTDB 미사용 — 라이브 스코어는 store 폴링으로 반영
     window.rtdb.ref("scoreboard").set({
       title: payload.title || "",
       a: {
@@ -1618,10 +1685,14 @@ const hashPassword = async (pw) => {
 };
 const loadAdminPasswordHash = async () => {
   try {
-    if (!fsDb) return null;
-    const doc = await fsDb.collection(FS_COLLECTION).doc("config").get();
-    if (doc.exists) return doc.data().passwordHash || null;
-    return null;
+    const res = await fetch(`${PS_API}/config`, { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const payload = json.data || {};
+    if (payload.data == null) return null;
+    let cfg;
+    try { cfg = JSON.parse(payload.data); } catch { cfg = {}; }
+    return cfg.passwordHash || null;
   } catch { return null; }
 };
 
@@ -1635,9 +1706,13 @@ const resetAdminPasswordWithRecoveryCode = async (recoveryCode, newPassword) => 
     return { ok: false, error: "새 비밀번호는 4자 이상" };
   }
   try {
-    if (!fsDb) return { ok: false, error: "DB 연결 안됨" };
     const newHash = await hashPassword(newPassword);
-    await fsDb.collection(FS_COLLECTION).doc("config").set({ passwordHash: newHash }, { merge: true });
+    const res = await fetch(`${PS_API}/config/merge`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passwordHash: newHash }),
+    });
+    if (!res.ok) return { ok: false, error: "저장 실패: " + res.status };
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -1678,7 +1753,9 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [showAdminPasswordModal, setShowAdminPasswordModal] = useState(false);
+  const [adminEmailInput, setAdminEmailInput] = useState("");
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
+  const [currentUser, setCurrentUser] = useState(() => (typeof psGetUser === "function" ? psGetUser() : null));
   const [resetMode, setResetMode] = useState(false);
   const [resetRecoveryCode, setResetRecoveryCode] = useState("");
   const [resetNewPassword, setResetNewPassword] = useState("");
@@ -1737,67 +1814,99 @@ export default function App() {
   const rankingsRef = useRef(rankings);
   rankingsRef.current = rankings;
 
+  // Playus 어댑터: Firestore onSnapshot 대체 — polling (4초).
+  // updatedAt(version)만 먼저 비교 → 변경된 doc만 data fetch (대역폭 절약).
+  // window.__psStoreVersions: docId별 마지막 반영 버전 (saveToFirestore가 자기 변경 표시).
   useEffect(() => {
-    if (!window.db) { setDataLoaded(true); return; }
-    let firstSnapshotCount = 0;
-    let unsubs = [];
-    const markLoaded = () => {
-      firstSnapshotCount += 1;
-      if (firstSnapshotCount >= 3) setDataLoaded(true);
+    window.__psStoreVersions = window.__psStoreVersions || {};
+    const versions = window.__psStoreVersions;
+    const setters = {
+      tournaments: (items) => { setTournaments(items); tournamentsRef.current = items; },
+      players: (items) => { setPlayers(items); playersRef.current = items; },
+      rankings: (items) => { setRankings(items); rankingsRef.current = items; },
     };
-    const parseDoc = (doc) => {
-      if (!doc.exists) return [];
-      const raw = doc.data();
-      if (raw.data) {
-        try { return JSON.parse(raw.data); } catch { return []; }
+    let stopped = false;
+
+    const fetchDoc = async (docId) => {
+      const r = await loadFromFirestore(docId); // { items, updatedAt } | null
+      const items = r ? r.items : [];
+      setters[docId](items);
+      versions[docId] = r ? r.updatedAt : null;
+    };
+
+    // 최초 1회 — 3개 doc 병렬 로드 후 dataLoaded
+    (async () => {
+      try {
+        await Promise.all(["tournaments", "players", "rankings"].map(fetchDoc));
+      } catch (e) {
+        console.error("initial store load error:", e);
+      } finally {
+        if (!stopped) setDataLoaded(true);
       }
-      return raw.items || [];
-    };
-    // 익명 인증 완료 후 Firestore 구독 시작
-    const start = () => {
-      const unsubT = fsDb.collection(FS_COLLECTION).doc("tournaments").onSnapshot(
-        (doc) => { const items = parseDoc(doc); setTournaments(items); tournamentsRef.current = items; markLoaded(); },
-        (err) => { console.error("tournaments snapshot error:", err); markLoaded(); }
-      );
-      const unsubP = fsDb.collection(FS_COLLECTION).doc("players").onSnapshot(
-        (doc) => { const items = parseDoc(doc); setPlayers(items); playersRef.current = items; markLoaded(); },
-        (err) => { console.error("players snapshot error:", err); markLoaded(); }
-      );
-      const unsubR = fsDb.collection(FS_COLLECTION).doc("rankings").onSnapshot(
-        (doc) => { const items = parseDoc(doc); setRankings(items); rankingsRef.current = items; markLoaded(); },
-        (err) => { console.error("rankings snapshot error:", err); markLoaded(); }
-      );
-      unsubs = [unsubT, unsubP, unsubR];
-    };
-    if (window.authReady) {
-      window.authReady.finally(start);
-    } else {
-      start();
-    }
-    return () => { unsubs.forEach((u) => u && u()); };
+    })();
+
+    // 폴링 — 버전 변경 감지 시에만 data fetch
+    const POLL_MS = 4000;
+    const timer = setInterval(async () => {
+      if (stopped) return;
+      for (const docId of ["tournaments", "players", "rankings"]) {
+        try {
+          const res = await fetch(`${PS_API}/${docId}/version`, { headers: psHeaders() });
+          if (!res.ok) continue;
+          const json = await res.json();
+          const ua = json.data && json.data.updatedAt;
+          if (ua && ua !== versions[docId]) {
+            await fetchDoc(docId); // 외부 변경 → 갱신
+          }
+        } catch (e) {
+          // 네트워크 일시 오류 — 다음 주기에 재시도
+        }
+      }
+    }, POLL_MS);
+
+    return () => { stopped = true; clearInterval(timer); };
   }, []);
 
   const updateAndSaveTournaments = useCallback(async (updater) => {
-    const next = typeof updater === "function" ? updater(tournamentsRef.current) : updater;
-    await saveToFirestore("tournaments", next);
+    const prev = tournamentsRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
     setTournaments(next);
     tournamentsRef.current = next;
+    const ok = await saveToFirestore("tournaments", next);
+    if (!ok) {
+      // 저장 실패 — 화면을 서버 상태(이전)로 되돌려 "지운 줄 알았는데 부활" 착시 방지
+      setTournaments(prev);
+      tournamentsRef.current = prev;
+      return prev;
+    }
     return next;
   }, []);
 
   const updateAndSavePlayers = useCallback(async (updater) => {
-    const next = typeof updater === "function" ? updater(playersRef.current) : updater;
-    await saveToFirestore("players", next);
+    const prev = playersRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
     setPlayers(next);
     playersRef.current = next;
+    const ok = await saveToFirestore("players", next);
+    if (!ok) {
+      setPlayers(prev);
+      playersRef.current = prev;
+      return prev;
+    }
     return next;
   }, []);
 
   const updateAndSaveRankings = useCallback(async (updater) => {
-    const next = typeof updater === "function" ? updater(rankingsRef.current) : updater;
-    await saveToFirestore("rankings", next);
+    const prev = rankingsRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
     setRankings(next);
     rankingsRef.current = next;
+    const ok = await saveToFirestore("rankings", next);
+    if (!ok) {
+      setRankings(prev);
+      rankingsRef.current = prev;
+      return prev;
+    }
     return next;
   }, []);
 
@@ -1820,20 +1929,60 @@ export default function App() {
 
   const T = useCallback((key) => t(lang, key), [lang]);
 
+  // 세션 만료(토큰 갱신까지 실패) 시 재로그인 모달 — psAuthedFetch가 ps-auth-expired 발생시킴.
+  useEffect(() => {
+    const onExpired = () => {
+      setIsAdminAuthenticated(false);
+      setIsAdmin(false);
+      setShowAdminPasswordModal(true);
+      setToastMessage("세션이 만료되었습니다. 다시 로그인해주세요.");
+      setTimeout(() => setToastMessage(""), 3000);
+    };
+    window.addEventListener("ps-auth-expired", onExpired);
+    return () => window.removeEventListener("ps-auth-expired", onExpired);
+  }, []);
+
   // 관리자 로그인 (Firestore 해시 비교)
+  // Playus 계정 로그인 — center_admin / super_admin 만 어드민 진입.
   const tryAdminLogin = async () => {
-    const storedHash = await loadAdminPasswordHash();
-    const inputHash = await hashPassword(adminPasswordInput);
-    if (storedHash && inputHash === storedHash) {
+    try {
+      // 앱/admin과 동일하게 md5 해시 전송 (백엔드는 저장된 md5와 평문 비교)
+      const md5fn = window.md5 || ((x) => x);
+      const res = await fetch(`${PS_API_ROOT}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ email: (adminEmailInput || "").trim(), password: md5fn(adminPasswordInput) }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.isSuccess) {
+        setToastMessage(json.message || "로그인 실패");
+        setTimeout(() => setToastMessage(""), 2500);
+        return;
+      }
+      const user = json.data || {};
+      const role = user.role;
+      if (role !== "center_admin" && role !== "super_admin") {
+        setToastMessage("어드민 권한이 없는 계정입니다");
+        setTimeout(() => setToastMessage(""), 2500);
+        return;
+      }
+      psSetAuth(user.token, {
+        _id: user._id,
+        role,
+        centerAdminFor: user.centerAdminFor || [],
+        name: `${user.lastNameKorean || ""}${user.firstNameKorean || ""}`.trim() || user.email,
+      });
+      setCurrentUser(psGetUser());
       setIsAdminAuthenticated(true);
       setIsAdmin(true);
       setPage(pendingAdminPage);
       setSelectedTournament(null);
       setShowAdminPasswordModal(false);
       setAdminPasswordInput("");
-    } else {
-      setToastMessage(T("wrongPassword"));
-      setTimeout(() => setToastMessage(""), 2000);
+      setAdminEmailInput("");
+    } catch (e) {
+      setToastMessage("로그인 오류: " + e.message);
+      setTimeout(() => setToastMessage(""), 2500);
     }
   };
 
@@ -2217,89 +2366,47 @@ export default function App() {
               onCancel={() => { setShowCreateForm(false); setEditingTournament(null); }}
               T={T}
               lang={lang}
+              currentUser={currentUser}
             />
           </Modal>
         )}
-        {/* Admin Password Modal */}
+        {/* Admin Login Modal — Playus 계정 로그인 (center_admin / super_admin) */}
         {showAdminPasswordModal && (
           <Modal onClose={() => {
             setShowAdminPasswordModal(false);
+            setAdminEmailInput("");
             setAdminPasswordInput("");
-            setResetMode(false);
-            setResetRecoveryCode("");
-            setResetNewPassword("");
           }}>
             <div style={{ padding: 24 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>
-                {resetMode ? "비밀번호 재설정" : T("adminPassword")}
-              </h2>
-
-              {!resetMode ? (
-                <>
-                  <FormField label={T("enterPassword")}>
-                    <input
-                      type="password"
-                      value={adminPasswordInput}
-                      onChange={(e) => setAdminPasswordInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") tryAdminLogin(); }}
-                      style={inputStyle}
-                      autoFocus
-                      placeholder="****"
-                    />
-                  </FormField>
-                  <div style={{ marginTop: 8, textAlign: "right" }}>
-                    <button
-                      onClick={() => setResetMode(true)}
-                      style={{ background: "transparent", border: "none", color: colors.primary, fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 4 }}
-                    >
-                      비밀번호 재설정
-                    </button>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-                    <Btn variant="outline" onClick={() => { setShowAdminPasswordModal(false); setAdminPasswordInput(""); }}>{T("cancel")}</Btn>
-                    <Btn onClick={tryAdminLogin}>{T("login")}</Btn>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p style={{ fontSize: 12, color: colors.gray500, marginBottom: 12, lineHeight: 1.5 }}>
-                    복구 코드와 새 비밀번호를 입력하세요. 복구 코드는 코드 소유자만 알 수 있습니다.
-                  </p>
-                  <FormField label="복구 코드">
-                    <input
-                      type="password"
-                      value={resetRecoveryCode}
-                      onChange={(e) => setResetRecoveryCode(e.target.value)}
-                      style={inputStyle}
-                      autoFocus
-                      placeholder="복구 코드"
-                    />
-                  </FormField>
-                  <div style={{ height: 12 }} />
-                  <FormField label="새 비밀번호 (4자 이상)">
-                    <input
-                      type="password"
-                      value={resetNewPassword}
-                      onChange={(e) => setResetNewPassword(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") tryResetAdminPassword(); }}
-                      style={inputStyle}
-                      placeholder="****"
-                    />
-                  </FormField>
-                  <div style={{ marginTop: 8, textAlign: "right" }}>
-                    <button
-                      onClick={() => { setResetMode(false); setResetRecoveryCode(""); setResetNewPassword(""); }}
-                      style={{ background: "transparent", border: "none", color: colors.gray500, fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 4 }}
-                    >
-                      ← 로그인으로 돌아가기
-                    </button>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-                    <Btn variant="outline" onClick={() => { setShowAdminPasswordModal(false); setResetMode(false); setResetRecoveryCode(""); setResetNewPassword(""); }}>{T("cancel")}</Btn>
-                    <Btn onClick={tryResetAdminPassword}>재설정</Btn>
-                  </div>
-                </>
-              )}
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>관리자 로그인</h2>
+              <p style={{ fontSize: 12, color: colors.gray500, marginBottom: 16, lineHeight: 1.5 }}>
+                Playus 센터 관리자 계정으로 로그인하세요.
+              </p>
+              <FormField label="이메일">
+                <input
+                  type="email"
+                  value={adminEmailInput}
+                  onChange={(e) => setAdminEmailInput(e.target.value)}
+                  style={inputStyle}
+                  autoFocus
+                  placeholder="admin@example.com"
+                />
+              </FormField>
+              <div style={{ height: 12 }} />
+              <FormField label={T("enterPassword")}>
+                <input
+                  type="password"
+                  value={adminPasswordInput}
+                  onChange={(e) => setAdminPasswordInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") tryAdminLogin(); }}
+                  style={inputStyle}
+                  placeholder="****"
+                />
+              </FormField>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+                <Btn variant="outline" onClick={() => { setShowAdminPasswordModal(false); setAdminEmailInput(""); setAdminPasswordInput(""); }}>{T("cancel")}</Btn>
+                <Btn onClick={tryAdminLogin}>{T("login")}</Btn>
+              </div>
             </div>
           </Modal>
         )}
@@ -3043,7 +3150,7 @@ function AdminPanel({ tournaments, onSelect, onCreate, onEdit, onDelete, onRecal
 // ============================================================
 // TOURNAMENT FORM (Create / Edit)
 // ============================================================
-function TournamentForm({ existing, onSave, onCancel, T, lang }) {
+function TournamentForm({ existing, onSave, onCancel, T, lang, currentUser }) {
   const [form, setForm] = useState(
     existing || {
       name: "",
@@ -3053,6 +3160,8 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
       date: "",
       registrationDeadline: "",
       location: "",
+      centerId: "",
+      courtIds: [],
       entryFee: "",
       description: "",
       maxTeams: "8",
@@ -3074,6 +3183,55 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
   );
 
   const set = (key, val) => setForm((p) => ({ ...p, [key]: val }));
+
+  // ── Playus 센터/코트 로드 (Step 3) ──
+  // center_admin은 본인 센터(centerAdminFor)만, super_admin은 전체.
+  const [centers, setCenters] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${PS_API_ROOT}/center/list`, { headers: psHeaders() });
+        if (!res.ok) return;
+        const json = await res.json();
+        let list = json.data;
+        if (list && !Array.isArray(list) && Array.isArray(list.centers)) list = list.centers;
+        if (!Array.isArray(list)) return;
+        const u = currentUser || (typeof psGetUser === "function" ? psGetUser() : null);
+        if (u && u.role === "center_admin") {
+          const mine = (u.centerAdminFor || []).map(String);
+          list = list.filter((c) => mine.includes(String(c._id)));
+        }
+        setCenters(list);
+        // 센터 1개면 자동 선택
+        if (!form.centerId && list.length === 1) {
+          const c = list[0];
+          setForm((p) => ({ ...p, centerId: c._id, location: c.name || p.location }));
+        }
+      } catch (e) {
+        console.error("center load failed", e);
+      }
+    })();
+  }, []);
+
+  const selectedCenter = centers.find((c) => String(c._id) === String(form.centerId));
+  const centerCourts = (selectedCenter && Array.isArray(selectedCenter.courts))
+    ? selectedCenter.courts.filter((ct) => ct.status !== "Maintenance")
+    : [];
+  const courtLabel = (ct) => ct.name || (ct.courtNumber != null ? `코트 ${ct.courtNumber}` : "코트");
+
+  const onPickCenter = (cid) => {
+    const c = centers.find((x) => String(x._id) === String(cid));
+    setForm((p) => ({ ...p, centerId: cid, location: c ? (c.name || "") : "", courtIds: [], courts: "" }));
+  };
+  const toggleCourt = (ctId, ctName) => {
+    setForm((p) => {
+      const ids = Array.isArray(p.courtIds) ? p.courtIds : [];
+      const has = ids.includes(ctId);
+      const nextIds = has ? ids.filter((x) => x !== ctId) : [...ids, ctId];
+      const names = centerCourts.filter((c) => nextIds.includes(c._id)).map(courtLabel);
+      return { ...p, courtIds: nextIds, courts: names.join(", ") };
+    });
+  };
 
   const openTeamOptions = ["4", "5", "8", "10"];
   const maxTeamsForOpen = { "4": 4, "5": 5, "8": 8, "10": 10 };
@@ -3171,14 +3329,45 @@ function TournamentForm({ existing, onSave, onCancel, T, lang }) {
           <FormField label={T("registrationDeadline")}>
             <DatePickerWithDay value={form.registrationDeadline || ""} onChange={(v) => set("registrationDeadline", v)} lang={lang} />
           </FormField>
-          <FormField label={T("location")}>
-            <input value={form.location} onChange={(e) => set("location", e.target.value)} style={inputStyle} />
+          <FormField label="센터">
+            <select value={form.centerId || ""} onChange={(e) => onPickCenter(e.target.value)} style={inputStyle}>
+              <option value="">센터 선택</option>
+              {centers.map((c) => (
+                <option key={c._id} value={c._id}>{c.name}</option>
+              ))}
+            </select>
           </FormField>
         </div>
 
-        <FormField label={T("courts")}>
-          <input value={form.courts} onChange={(e) => set("courts", e.target.value)} style={inputStyle} placeholder="코트 1, 코트 2, 코트 3" />
-        </FormField>
+        {form.centerId && centerCourts.length > 0 && (
+          <FormField label="코트 선택 (복수 선택 가능)">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {centerCourts.map((ct) => {
+                const active = (form.courtIds || []).includes(ct._id);
+                return (
+                  <button
+                    key={ct._id}
+                    type="button"
+                    onClick={() => toggleCourt(ct._id, courtLabel(ct))}
+                    style={{
+                      padding: "8px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                      border: `1px solid ${active ? colors.primary : colors.gray300}`,
+                      background: active ? colors.primary : colors.white,
+                      color: active ? colors.white : colors.gray700,
+                    }}
+                  >
+                    {courtLabel(ct)}
+                  </button>
+                );
+              })}
+            </div>
+          </FormField>
+        )}
+        {!form.centerId && (
+          <FormField label={T("location")}>
+            <input value={form.location} onChange={(e) => set("location", e.target.value)} style={inputStyle} placeholder="센터를 선택하거나 직접 입력" />
+          </FormField>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <FormField label={T("entryFee")}>
@@ -4224,8 +4413,8 @@ function RegistrationForm({ tournament, onSubmit, onCancel, T, isAdmin, players,
               </div>
             </>
           )}
-          {!isAdmin && !selectedPlayerObj && (
-            <FormField label={T("playerPhone")}>
+          {!selectedPlayerObj && (
+            <FormField label={`${T("playerPhone")}${isAdmin ? " (회원 연결용 — 선택)" : ""}`}>
               <input type="tel" value={form.playerPhone} onChange={(e) => set("playerPhone", e.target.value)} style={inputStyle} placeholder="010-0000-0000" />
             </FormField>
           )}
@@ -4249,8 +4438,8 @@ function RegistrationForm({ tournament, onSubmit, onCancel, T, isAdmin, players,
                     <GenderSelect value={form.partnerGender} onChange={(v) => set("partnerGender", v)} />
                   </FormField>
             </div>
-            {!isAdmin && !selectedPartnerObj && (
-              <FormField label={T("partnerPhone")}>
+            {!selectedPartnerObj && (
+              <FormField label={`${T("partnerPhone")}${isAdmin ? " (회원 연결용 — 선택)" : ""}`}>
                 <input type="tel" value={form.partnerPhone} onChange={(e) => set("partnerPhone", e.target.value)} style={inputStyle} placeholder="010-0000-0000" />
               </FormField>
             )}
