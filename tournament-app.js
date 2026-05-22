@@ -3807,20 +3807,33 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
   
   const needsGroupDraw = (type, maxT) => type === "open" && (maxT === 4 || maxT === 5 || maxT === 8 || maxT === 10);
 
+  // 조편성(대진표 생성)이 이미 됐는지
+  const hasDraw = !!(tournament.groups || tournament.knockoutBracket || tournament.americanoData);
+  // 시작 전에 미리 조편성하는 타입 — generateBracketForTeams가 조/대진표를 만들어주는 타입.
+  // (아메리카노/스페셜은 시작 후 자체 생성 흐름이라 제외)
+  const isPreDrawType = ["open", "cup", "league"].includes(tournament.type);
+
+  // 1단계: 조편성 — 대진표만 생성하고 stage는 registration 유지 (아직 LIVE 아님)
+  const drawTournament = () => {
+    const teams = confirmedRegs.map((r) => ({ id: r.id, name: r.teamName || r.playerName }));
+    const data = generateBracketForTeams(teams, tournament.type);
+    onUpdateTournament(tournament.id, { ...data });
+  };
+
+  // 2단계: 토너먼트 시작 — stage=ongoing (→ LIVE). 이미 조편성됐으면 재생성 안 함.
   const startTournament = () => {
     let updates = { stage: "ongoing" };
-    const teams = confirmedRegs.map((r) => ({ id: r.id, name: r.teamName || r.playerName }));
-    const maxT = parseInt(tournament.maxTeams);
-
-    if (tournament.type === "americano") {
-      // 대진표는 시작 후 "대진표 생성" 버튼으로 별도 생성
-    } else if (needsGroupDraw(tournament.type, maxT)) {
-      // Don't auto-generate groups — let admin use Draw button or manual assignment
-    } else {
-      const data = generateBracketForTeams(teams, tournament.type);
-      updates = { ...updates, ...data };
+    if (!hasDraw) {
+      const teams = confirmedRegs.map((r) => ({ id: r.id, name: r.teamName || r.playerName }));
+      const maxT = parseInt(tournament.maxTeams);
+      if (tournament.type === "americano") {
+        // 대진표는 시작 후 "대진표 생성" 버튼으로 별도 생성
+      } else if (needsGroupDraw(tournament.type, maxT)) {
+        // Draw 버튼/수동 배정으로 생성
+      } else {
+        updates = { ...updates, ...generateBracketForTeams(teams, tournament.type) };
+      }
     }
-
     onUpdateTournament(tournament.id, updates);
   };
 
@@ -3971,7 +3984,9 @@ function TournamentDetail({ tournament, isAdmin, onBack, onConfirmPayment, onRej
           )}
         </div>
         {isAdmin && tournament.stage === "registration" && confirmedRegs.length >= 2 && (
-          <Btn variant="success" onClick={startTournament}>{T("startTournament")}</Btn>
+          (isPreDrawType && !hasDraw)
+            ? <Btn variant="outline" onClick={drawTournament}>{T("generateGroupsDraw")}</Btn>
+            : <Btn variant="success" onClick={startTournament}>{T("startTournament")}</Btn>
         )}
         {isAdmin && tournament.stage === "ongoing" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
