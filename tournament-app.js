@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "7.1";
+const APP_VERSION = "7.2";
 
 // ============================================================
 // INTERNATIONALIZATION
