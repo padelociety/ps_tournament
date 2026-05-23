@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "7.2";
+const APP_VERSION = "7.3";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2672,7 +2672,7 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
 
   const addSet = () => {
     if (gameA === 0 && gameB === 0) return;
-    const newSets = [...completedSets, { h: gameA, a: gameB }];
+    const newSets = [...completedSets, { h: gameA, a: gameB, tb: superTB }];
     setCompletedSets(newSets);
     setGameA(0);
     setGameB(0);
@@ -2681,7 +2681,7 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
 
   const handleEnd = () => {
     if (setMode) {
-      const allSets = (gameA > 0 || gameB > 0) ? [...completedSets, { h: gameA, a: gameB }] : completedSets;
+      const allSets = (gameA > 0 || gameB > 0) ? [...completedSets, { h: gameA, a: gameB, tb: superTB }] : completedSets;
       let hw = 0, aw = 0;
       allSets.forEach((s) => { if (s.h > s.a) hw++; else if (s.a > s.h) aw++; });
       onEnd(hw, aw, allSets);
@@ -2742,7 +2742,7 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
                 padding: "6px 14px", borderRadius: 10, background: colors.gray100,
                 fontSize: 16, fontWeight: 700, color: colors.gray700,
               }}>
-                {lang === "ko" ? `${i + 1}세트` : `Set ${i + 1}`} {s.h}-{s.a}
+                {s.tb ? "S-TB" : (lang === "ko" ? `${i + 1}세트` : `Set ${i + 1}`)} {s.h}-{s.a}
               </span>
             ))}
           </div>
@@ -6414,7 +6414,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               <span style={{ fontSize: 13, color: colors.gray800 }}>{getTeamName(m.home)}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 {m.setScores ? m.setScores.map((s, si) => (
-                  <span key={si} style={{ fontSize: 12, fontWeight: s.h > s.a ? 700 : 400, color: s.h > s.a ? colors.primary : colors.gray400, minWidth: 14, textAlign: "center" }}>{s.h}</span>
+                  <span key={si} style={{ fontSize: 12, fontWeight: s.h > s.a ? 700 : 400, color: s.h > s.a ? colors.primary : colors.gray400, minWidth: 14, textAlign: "center" }}>{s.h}{s.tb ? <sup style={{ fontSize: 8, color: colors.warning }}>TB</sup> : ""}</span>
                 )) : (
                   <span style={{ fontWeight: 700, fontSize: 16 }}>{(m.completed || m.live) ? m.homeScore : ""}</span>
                 )}
@@ -6430,7 +6430,7 @@ function BracketTab({ tournament, isAdmin, onUpdateTournament, onAdvanceToKnocko
               <span style={{ fontSize: 13, color: colors.gray800 }}>{getTeamName(m.away)}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 {m.setScores ? m.setScores.map((s, si) => (
-                  <span key={si} style={{ fontSize: 12, fontWeight: s.a > s.h ? 700 : 400, color: s.a > s.h ? colors.primary : colors.gray400, minWidth: 14, textAlign: "center" }}>{s.a}</span>
+                  <span key={si} style={{ fontSize: 12, fontWeight: s.a > s.h ? 700 : 400, color: s.a > s.h ? colors.primary : colors.gray400, minWidth: 14, textAlign: "center" }}>{s.a}{s.tb ? <sup style={{ fontSize: 8, color: colors.warning }}>TB</sup> : ""}</span>
                 )) : (
                   <span style={{ fontWeight: 700, fontSize: 16 }}>{(m.completed || m.live) ? m.awayScore : ""}</span>
                 )}
