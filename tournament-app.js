@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, createContext, useContext } from "react";
 
-const APP_VERSION = "7.3";
+const APP_VERSION = "7.4";
 
 // ============================================================
 // INTERNATIONALIZATION
@@ -2626,7 +2626,7 @@ function LiveScorePanel({ match, homeName, awayName, tournamentTitle, matchLabel
   const numOr0 = (v) => (typeof v === "number" && !isNaN(v) ? v : 0);
   const initGameA = numOr0(match.homeScore ?? match.team1Score);
   const initGameB = numOr0(match.awayScore ?? match.team2Score);
-  const initSets = (setMode && match.setScores) ? match.setScores.map((s) => ({ h: s.h, a: s.a })) : [];
+  const initSets = (setMode && match.setScores) ? match.setScores.map((s) => ({ h: s.h, a: s.a, tb: s.tb })) : [];
 
   // setMode: completedSets는 끝난 세트들, gameA/gameB는 현재 세트
   // game mode: gameA/gameB가 곧 최종 게임 카운트
