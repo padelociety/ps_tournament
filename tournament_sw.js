@@ -1,4 +1,4 @@
-const CACHE_NAME = "ps-tournament-v73";
+const CACHE_NAME = "ps-tournament-v74";
 const OWN_ASSETS = [
   "./tournament.html",
   "./tournament-app.js",
@@ -8,9 +8,9 @@ const OWN_ASSETS = [
 ];
 const CDN_ASSETS = [
   "https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800;900&display=swap",
-  "https://unpkg.com/react@18/umd/react.production.min.js",
-  "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
-  "https://unpkg.com/@babel/standalone/babel.min.js",
+  "https://unpkg.com/react@18.3.1/umd/react.production.min.js",
+  "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js",
+  "https://unpkg.com/@babel/standalone@7/babel.min.js",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js",

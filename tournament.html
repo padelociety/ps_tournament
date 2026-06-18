@@ -24,9 +24,12 @@ body {
 }
 #root { min-height: 100vh; }
 </style>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<!-- ⚠️ Babel 메이저 핀 필수(@7). @latest는 8.x로 올라 preset-react 기본 runtime이 classic→automatic이 되며
+     JSX 출력 상단에 `import {jsx} from "react/jsx-runtime"`를 주입 → classic <script> 파싱에러 → 전체 검은화면.
+     아래 transform의 runtime:"classic" 강제와 함께 이중 방어. -->
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/blueimp-md5/2.19.0/js/md5.min.js"></script>
 <!-- 스코어보드 송출용 Firebase RTDB (ps-scoreboard 연동) -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -65,6 +68,19 @@ try {
 // React hooks를 전역으로 노출
 const { useState, useEffect, useCallback, useRef, createContext, useContext } = React;
 
+// 렌더 전 치명적 오류를 화면에 노출 — 주입 <script>의 파싱/런타임 에러는 아래 .catch로 안 잡혀
+// (별도 실행 컨텍스트). 전역 error/rejection 핸들러로 잡아 #root가 비어있으면 메시지 표시(검은화면 방지).
+function psShowFatal(msg) {
+  const root = document.getElementById("root");
+  if (root && !root.firstChild) {
+    root.innerHTML = '<div style="padding:40px;text-align:center;color:#f87171;font-size:14px;line-height:1.7">'
+      + '앱 실행 오류<br><span style="color:#9ca3af;font-size:12px;word-break:break-all">'
+      + String(msg || "").slice(0, 300) + '</span></div>';
+  }
+}
+window.addEventListener("error", (e) => psShowFatal(e.message || (e.error && e.error.message)));
+window.addEventListener("unhandledrejection", (e) => psShowFatal(e.reason && (e.reason.message || e.reason)));
+
 // tournament-app.js 로드 및 실행
 fetch("tournament-app.js")
   .then(r => r.text())
@@ -75,8 +91,8 @@ fetch("tournament-app.js")
     code = code.replace(/export\s+default\s+function\s+App/, "function App");
     // 마지막에 렌더링 코드 추가
     code += "\nReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));";
-    // Babel 변환 후 실행
-    const transformed = Babel.transform(code, { presets: ["react"] }).code;
+    // Babel 변환 후 실행 — runtime:"classic"을 명시해 React.createElement로 변환(자동런타임 import 주입 차단).
+    const transformed = Babel.transform(code, { presets: [["react", { runtime: "classic" }]] }).code;
     const script = document.createElement("script");
     script.textContent = transformed;
     document.body.appendChild(script);
