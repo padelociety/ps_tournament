@@ -162,11 +162,16 @@ const translations = {
     mixedDoubles: "혼복",
     openDoubles: "자유",
     beginner: "비기너",
+    bronzeMinus: "브론즈-",
     bronze: "브론즈",
+    bronzePlus: "브론즈+",
+    silverMinus: "실버-",
     silver: "실버",
     silverPlus: "실버+",
+    goldMinus: "골드-",
     gold: "골드",
     goldPlus: "골드+",
+    platinumMinus: "플레티넘-",
     platinum: "플레티넘",
     platinumPlus: "플레티넘+",
     addCategory: "카테고리 추가",
@@ -397,11 +402,16 @@ const translations = {
     mixedDoubles: "Mixed Doubles",
     openDoubles: "Open",
     beginner: "Beginner",
+    bronzeMinus: "Bronze-",
     bronze: "Bronze",
+    bronzePlus: "Bronze+",
+    silverMinus: "Silver-",
     silver: "Silver",
     silverPlus: "Silver+",
+    goldMinus: "Gold-",
     gold: "Gold",
     goldPlus: "Gold+",
+    platinumMinus: "Platinum-",
     platinum: "Platinum",
     platinumPlus: "Platinum+",
     addCategory: "Add Category",
@@ -650,7 +660,7 @@ const pushToScoreboard = (payload) => {
 };
 
 const GENDER_TYPES = ["menDoubles", "womenDoubles", "mixedDoubles", "openDoubles"];
-const LEVELS = ["beginner", "bronze", "silver", "silverPlus", "gold", "goldPlus", "platinum", "platinumPlus"];
+const LEVELS = ["beginner", "bronzeMinus", "bronze", "bronzePlus", "silverMinus", "silver", "silverPlus", "goldMinus", "gold", "goldPlus", "platinumMinus", "platinum", "platinumPlus"];
 
 // Build a category label like "남복 골드" or "Men's Doubles Gold"
 const categoryLabel = (lang, genderKey, levelKey) => {
@@ -2905,6 +2915,8 @@ function TournamentList({ tournaments, onSelect, T, lang }) {
   now.setHours(0, 0, 0, 0);
   // 진행 중: 종료되지 않았고, (날짜 없음 OR 미래 날짜)
   const upcoming = tournaments.filter((t) => t.stage !== "completed" && (!t.date || new Date(t.date) >= now));
+  // 진행 중 정렬: 가까운 날짜 먼저(오름차순), 같은 날은 시작시간순. 날짜 미정은 맨 뒤.
+  upcoming.sort((a, b) => ((a.date || "9999-99-99") + (a.startTime || "")).localeCompare((b.date || "9999-99-99") + (b.startTime || "")));
   // 지난: 종료됨 OR 날짜가 과거
   const past = tournaments.filter((t) => t.stage === "completed" || (t.date && new Date(t.date) < now));
   // 지난 토너먼트 정렬: 최신 날짜 먼저
@@ -4646,7 +4658,14 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
             {pending.map((r) => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", background: colors.warningLight, borderRadius: 8 }}>
                 <div>
-                  <div style={{ fontWeight: 700, color: colors.gray800 }}>{r.teamName || r.playerName}</div>
+                  <div style={{ fontWeight: 700, color: colors.gray800, display: "flex", alignItems: "center", gap: 6 }}>
+                    {r.teamName || r.playerName}
+                    {r.lookingForPartner && !r.partnerName && (
+                      <span style={{ padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: 700, background: colors.primaryLight, color: colors.primary }}>
+                        {lang === "ko" ? "파트너 구함" : "Needs partner"}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ fontSize: 12, color: colors.gray500, marginTop: 2 }}>
                     {r.playerName} {r.playerPhone}
                     {r.partnerName && <span> · {r.partnerName} {r.partnerPhone}</span>}
@@ -4693,6 +4712,11 @@ function ParticipantsTab({ tournament, isAdmin, onConfirmPayment, onRejectRegist
                   <span style={{ width: 24, fontWeight: 700, color: colors.gray400, fontSize: 13, flexShrink: 0 }}>{i + 1}</span>
                   <span style={{ fontWeight: 600, color: colors.gray800, fontSize: 15 }}>{r.teamName || r.playerName}</span>
                   {r.seed && <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 700, background: colors.warningLight, color: colors.warning }}>S{r.seed}</span>}
+                  {r.lookingForPartner && !r.partnerName && (
+                    <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 700, background: colors.primaryLight, color: colors.primary }}>
+                      {lang === "ko" ? "파트너 구함" : "Needs partner"}
+                    </span>
+                  )}
                 </div>
                 {/* 2줄: 관리자 상세 (이름 편집 + 등록 상태) */}
                 {isAdmin && (

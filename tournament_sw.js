@@ -1,4 +1,4 @@
-const CACHE_NAME = "ps-tournament-v74";
+const CACHE_NAME = "ps-tournament-v79"; // v79: '파트너 구함' 솔로 신청 배지(대기/확정 목록) / v78: 관리자 '진행 중' 목록 가까운 날짜 먼저(오름차순)
 const OWN_ASSETS = [
   "./tournament.html",
   "./tournament-app.js",
